@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QA Video Generator</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, sans-serif; background: #0f0f0f; color: #e5e5e5; min-height: 100vh; }
+header { background: #1a1a1a; border-bottom: 1px solid #333; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+header h1 { font-size: 20px; font-weight: 600; }
+header span { font-size: 24px; }
+.container { max-width: 960px; margin: 0 auto; padding: 32px 16px; }
+
+/* Steps */
+.steps { display: flex; gap: 0; margin-bottom: 40px; }
+.step { flex: 1; text-align: center; padding: 12px 4px; font-size: 13px; color: #666; position: relative; }
+.step::after { content: ''; position: absolute; top: 50%; right: 0; width: 1px; height: 60%; background: #333; transform: translateY(-50%); }
+.step:last-child::after { display: none; }
+.step.active { color: #e5e5e5; font-weight: 600; }
+.step.done { color: #4ade80; }
+.step .num { display: inline-block; width: 28px; height: 28px; border-radius: 50%; border: 2px solid #333; line-height: 24px; font-size: 12px; margin-bottom: 6px; }
+.step.active .num { border-color: #6366f1; color: #6366f1; }
+.step.done .num { border-color: #4ade80; color: #4ade80; }
+
+/* Cards */
+.card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+.card-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #e5e5e5; }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.15s; }
+.btn-primary { background: #6366f1; color: #fff; }
+.btn-primary:hover { background: #5558e0; }
+.btn-primary:disabled { background: #333; color: #666; cursor: not-allowed; }
+.btn-secondary { background: #2a2a2a; color: #e5e5e5; border: 1px solid #3a3a3a; }
+.btn-secondary:hover { background: #333; }
+.btn-danger { background: #ef4444; color: #fff; }
+.btn-danger:hover { background: #dc2626; }
+.btn-sm { padding: 6px 12px; font-size: 13px; }
+.btn-icon { padding: 6px 10px; }
+
+/* Image upload zones */
+.upload-zone { border: 2px dashed #333; border-radius: 10px; padding: 32px; text-align: center; cursor: pointer; transition: all 0.2s; }
+.upload-zone:hover, .upload-zone.drag-over { border-color: #6366f1; background: rgba(99, 102, 241, 0.05); }
+.upload-zone p { color: #666; font-size: 14px; margin-top: 8px; }
+.upload-zone .icon { font-size: 40px; }
+.upload-zone input[type=file] { display: none; }
+
+/* Image list */
+.image-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 16px; }
+.image-item { background: #222; border: 1px solid #333; border-radius: 8px; overflow: hidden; position: relative; }
+.image-item img { width: 100%; height: 120px; object-fit: cover; display: block; }
+.image-item .label { font-size: 11px; padding: 6px 8px; color: #aaa; display: flex; justify-content: space-between; align-items: center; }
+.image-item .remove-btn { cursor: pointer; color: #ef4444; font-size: 16px; line-height: 1; }
+.image-item .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; }
+.badge-question { background: #4f46e5; color: #fff; }
+.badge-answer { background: #059669; color: #fff; }
+
+/* Text review */
+.text-card { display: grid; grid-template-columns: 140px 1fr; gap: 16px; align-items: start; margin-bottom: 16px; background: #222; border: 1px solid #2a2a2a; border-radius: 10px; padding: 16px; }
+.text-card img { width: 140px; height: 120px; object-fit: cover; border-radius: 6px; }
+.text-card textarea { width: 100%; height: 100px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #e5e5e5; font-size: 14px; padding: 10px; resize: vertical; }
+.text-card textarea:focus { outline: none; border-color: #6366f1; }
+.text-card .card-label { font-size: 12px; color: #666; margin-bottom: 6px; }
+
+/* Voice selection */
+.voice-card { background: #222; border: 1px solid #2a2a2a; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+.voice-card .top { display: flex; gap: 16px; align-items: flex-start; }
+.voice-card img { width: 80px; height: 70px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+.voice-card .info { flex: 1; }
+.voice-card .seg-text { font-size: 14px; color: #ccc; margin-bottom: 10px; line-height: 1.5; }
+.voice-controls { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+select.voice-select { background: #1a1a1a; border: 1px solid #333; color: #e5e5e5; padding: 7px 12px; border-radius: 6px; font-size: 14px; }
+select.voice-select:focus { outline: none; border-color: #6366f1; }
+.playing { color: #4ade80; }
+
+/* Media selection */
+.media-section { margin-bottom: 24px; }
+.media-section h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #aaa; }
+.media-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.media-option { border: 2px solid #2a2a2a; border-radius: 8px; overflow: hidden; cursor: pointer; transition: all 0.15s; background: #222; }
+.media-option:hover { border-color: #555; }
+.media-option.selected { border-color: #6366f1; }
+.media-option img, .media-option video { width: 100%; height: 100px; object-fit: cover; display: block; }
+.media-option audio { width: 100%; }
+.media-option .media-label { font-size: 11px; padding: 6px 8px; color: #aaa; word-break: break-all; }
+.media-none { display: flex; align-items: center; justify-content: center; height: 100px; color: #444; font-size: 13px; }
+.no-media-msg { color: #666; font-size: 13px; padding: 8px 0; }
+
+/* Progress */
+.progress-bar { background: #2a2a2a; border-radius: 8px; height: 8px; overflow: hidden; margin: 12px 0; }
+.progress-fill { height: 100%; background: #6366f1; transition: width 0.5s; border-radius: 8px; }
+.status-text { font-size: 14px; color: #888; margin: 8px 0; }
+
+/* Final video */
+.video-container { text-align: center; }
+.video-container video { max-width: 360px; width: 100%; border-radius: 12px; background: #000; }
+.download-section { margin-top: 16px; display: flex; gap: 12px; justify-content: center; }
+
+/* Actions bar */
+.actions { display: flex; gap: 12px; margin-top: 24px; }
+
+/* Spinner */
+.spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid #444; border-top-color: #6366f1; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.processing-state { text-align: center; padding: 60px 0; }
+.processing-state .spinner { width: 48px; height: 48px; border-width: 3px; }
+.processing-state p { margin-top: 16px; color: #888; }
+
+/* Toast */
+#toast { position: fixed; bottom: 24px; right: 24px; background: #ef4444; color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 14px; display: none; z-index: 9999; }
+</style>
+</head>
+<body>
+
+<header>
+  <span>🎬</span>
+  <h1>QA Video Generator</h1>
+</header>
+
+<div id="toast"></div>
+
+<div class="container">
+  <!-- Steps indicator -->
+  <div class="steps" id="steps-bar">
+    <div class="step active" id="step-ind-1"><div class="num">1</div><br>Upload</div>
+    <div class="step" id="step-ind-2"><div class="num">2</div><br>Nội dung</div>
+    <div class="step" id="step-ind-3"><div class="num">3</div><br>Giọng đọc</div>
+    <div class="step" id="step-ind-4"><div class="num">4</div><br>Media</div>
+    <div class="step" id="step-ind-5"><div class="num">5</div><br>Video</div>
+  </div>
+
+  <!-- =========================================================
+       STEP 1: Upload
+  ========================================================== -->
+  <div id="view-upload">
+    <div class="card">
+      <div class="card-title">📷 Ảnh câu hỏi</div>
+      <div class="upload-zone" id="zone-question" onclick="document.getElementById('input-question').click()">
+        <input type="file" id="input-question" accept="image/*" onchange="handleQuestionFile(this)">
+        <div class="icon">❓</div>
+        <p>Nhấn để chọn hoặc dán ảnh (Ctrl+V)</p>
+      </div>
+      <div id="preview-question"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">😂 Ảnh câu trả lời</div>
+      <div class="upload-zone" id="zone-answers" onclick="document.getElementById('input-answers').click()">
+        <input type="file" id="input-answers" accept="image/*" multiple onchange="handleAnswerFiles(this)">
+        <div class="icon">💬</div>
+        <p>Nhấn để chọn hoặc dán ảnh (nhiều ảnh)</p>
+      </div>
+      <div class="image-list" id="answer-list"></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="btn-start" onclick="startJob()" disabled>
+        🚀 Bắt đầu tạo video
+      </button>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       Processing state (reused across steps)
+  ========================================================== -->
+  <div id="view-processing" style="display:none">
+    <div class="card processing-state">
+      <div class="spinner"></div>
+      <p id="processing-msg">Đang xử lý...</p>
+      <div class="progress-bar" style="max-width:400px;margin:16px auto 0">
+        <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+      </div>
+      <p class="status-text" id="progress-text">0%</p>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       STEP 2: Text review
+  ========================================================== -->
+  <div id="view-text-review" style="display:none">
+    <div class="card">
+      <div class="card-title">✏️ Kiểm tra & chỉnh sửa nội dung</div>
+      <p style="font-size:13px;color:#888;margin-bottom:16px">Chỉnh sửa văn bản nếu AI nhận diện sai</p>
+      <div id="text-cards"></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="confirmText()">✅ Xác nhận nội dung →</button>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       STEP 3: Voice selection
+  ========================================================== -->
+  <div id="view-voice" style="display:none">
+    <div class="card">
+      <div class="card-title">🎙️ Chọn giọng đọc</div>
+      <p style="font-size:13px;color:#888;margin-bottom:16px">Chọn giọng đọc và nhấn ▶ để nghe thử</p>
+      <div id="voice-cards"></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="confirmVoices()">✅ Xác nhận giọng đọc →</button>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       STEP 4: Media selection
+  ========================================================== -->
+  <div id="view-media" style="display:none">
+    <div class="card">
+      <div class="card-title">🎨 Chọn media</div>
+      <p style="font-size:13px;color:#888;margin-bottom:20px">Chọn background, GIF và âm thanh cho video</p>
+
+      <div class="media-section">
+        <h3>🖼️ Background / Nhạc nền</h3>
+        <div class="media-grid" id="bg-grid"></div>
+      </div>
+
+      <div class="media-section">
+        <h3>😂 Meme GIF (hiển thị giữa các câu)</h3>
+        <div class="media-grid" id="gif-grid"></div>
+      </div>
+
+      <div class="media-section">
+        <h3>🔊 Âm thanh hiệu ứng</h3>
+        <div class="media-grid" id="sound-grid"></div>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="regenerateMedia()">🔄 Tải lại options</button>
+      <button class="btn btn-primary" onclick="confirmMedia()">✅ Tạo video →</button>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       STEP 5: Done
+  ========================================================== -->
+  <div id="view-done" style="display:none">
+    <div class="card">
+      <div class="card-title">🎉 Video đã sẵn sàng!</div>
+      <div class="video-container">
+        <video id="final-video" controls></video>
+      </div>
+      <div class="download-section">
+        <a id="download-link" class="btn btn-primary" download>⬇️ Tải về MP4</a>
+        <button class="btn btn-secondary" onclick="resetAll()">🔁 Tạo video mới</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// State
+// ============================================================
+let jobId = null;
+let pollTimer = null;
+let questionFile = null;
+let answerFiles = [];
+let selectedMedia = { bg: null, gif: null, sound: null };
+let currentAudio = null;
+
+const VOICES = [
+  { id: 'alloy',   name: 'Alloy (Trung tính)' },
+  { id: 'echo',    name: 'Echo (Nam, trầm)' },
+  { id: 'fable',   name: 'Fable (Biểu cảm)' },
+  { id: 'onyx',    name: 'Onyx (Nam, uy)' },
+  { id: 'nova',    name: 'Nova (Nữ, ấm)' },
+  { id: 'shimmer', name: 'Shimmer (Nữ, nhẹ)' },
+];
+
+// ============================================================
+// Utilities
+// ============================================================
+function showToast(msg, duration = 4000) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.style.display = 'none', duration);
+}
+
+function showView(name) {
+  ['upload','processing','text-review','voice','media','done'].forEach(v =>
+    document.getElementById(`view-${v}`).style.display = 'none'
+  );
+  document.getElementById(`view-${name}`).style.display = 'block';
+}
+
+function setStepActive(n) {
+  for (let i = 1; i <= 5; i++) {
+    const el = document.getElementById(`step-ind-${i}`);
+    el.classList.remove('active', 'done');
+    if (i < n) el.classList.add('done');
+    else if (i === n) el.classList.add('active');
+  }
+}
+
+function updateProgress(pct, msg) {
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-text').textContent = pct + '%';
+  if (msg) document.getElementById('processing-msg').textContent = msg;
+}
+
+// ============================================================
+// Upload Step
+// ============================================================
+function handleQuestionFile(input) {
+  if (input.files[0]) setQuestionFile(input.files[0]);
+}
+
+function setQuestionFile(file) {
+  questionFile = file;
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('preview-question').innerHTML = `
+      <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
+        <img src="${e.target.result}" style="height:80px;border-radius:6px;object-fit:cover">
+        <span style="font-size:13px;color:#aaa">${file.name}</span>
+        <button class="btn btn-sm btn-danger" onclick="removeQuestion()">✕</button>
+      </div>`;
+    refreshStartBtn();
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeQuestion() {
+  questionFile = null;
+  document.getElementById('preview-question').innerHTML = '';
+  document.getElementById('input-question').value = '';
+  refreshStartBtn();
+}
+
+function handleAnswerFiles(input) {
+  [...input.files].forEach(f => addAnswerFile(f));
+  input.value = '';
+}
+
+function addAnswerFile(file) {
+  if (answerFiles.some(f => f.name === file.name && f.size === file.size)) return;
+  answerFiles.push(file);
+  renderAnswerList();
+  refreshStartBtn();
+}
+
+function removeAnswer(idx) {
+  answerFiles.splice(idx, 1);
+  renderAnswerList();
+  refreshStartBtn();
+}
+
+function renderAnswerList() {
+  const list = document.getElementById('answer-list');
+  if (!answerFiles.length) { list.innerHTML = ''; return; }
+  list.innerHTML = answerFiles.map((f, i) => {
+    const url = URL.createObjectURL(f);
+    return `<div class="image-item">
+      <img src="${url}">
+      <div class="label">
+        <span>A${i+1}: ${f.name.slice(0,15)}</span>
+        <span class="remove-btn" onclick="removeAnswer(${i})">✕</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function refreshStartBtn() {
+  document.getElementById('btn-start').disabled = !(questionFile && answerFiles.length > 0);
+}
+
+// Paste handler
+document.addEventListener('paste', e => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      const named = new File([file], `pasted_${Date.now()}.png`, { type: file.type });
+      if (!questionFile) setQuestionFile(named);
+      else addAnswerFile(named);
+    }
+  }
+});
+
+// Drag & drop for answer zone
+const answerZone = document.getElementById('zone-answers');
+answerZone.addEventListener('dragover', e => { e.preventDefault(); answerZone.classList.add('drag-over'); });
+answerZone.addEventListener('dragleave', () => answerZone.classList.remove('drag-over'));
+answerZone.addEventListener('drop', e => {
+  e.preventDefault();
+  answerZone.classList.remove('drag-over');
+  [...e.dataTransfer.files].forEach(f => { if (f.type.startsWith('image/')) addAnswerFile(f); });
+});
+
+const qZone = document.getElementById('zone-question');
+qZone.addEventListener('dragover', e => { e.preventDefault(); qZone.classList.add('drag-over'); });
+qZone.addEventListener('dragleave', () => qZone.classList.remove('drag-over'));
+qZone.addEventListener('drop', e => {
+  e.preventDefault();
+  qZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) setQuestionFile(f);
+});
+
+// ============================================================
+// Start job
+// ============================================================
+async function startJob() {
+  if (!questionFile || !answerFiles.length) return;
+
+  const formData = new FormData();
+  formData.append('question_image', questionFile, questionFile.name);
+  answerFiles.forEach(f => formData.append('answer_images', f, f.name));
+
+  setStepActive(1);
+  showView('processing');
+  updateProgress(0, 'Đang upload ảnh...');
+
+  try {
+    const res = await fetch('/api/v1/jobs', { method: 'POST', body: formData });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Upload thất bại');
+    const data = await res.json();
+    jobId = data.job_id;
+    startPolling();
+  } catch (err) {
+    showToast('❌ ' + err.message);
+    showView('upload');
+  }
+}
+
+// ============================================================
+// Polling
+// ============================================================
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(pollStatus, 2000);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function pollStatus() {
+  if (!jobId) return;
+  try {
+    const res = await fetch(`/api/v1/jobs/${jobId}`);
+    if (!res.ok) return;
+    const job = await res.json();
+    handleJobState(job);
+  } catch (e) { /* network error, retry */ }
+}
+
+function handleJobState(job) {
+  switch (job.status) {
+    case 'failed':
+      stopPolling();
+      showToast('❌ Lỗi: ' + (job.error?.message || 'Không rõ lỗi'));
+      showView('upload');
+      break;
+
+    case 'processing':
+      updateProgress(job.progress_percent, stepMsg(job.current_step));
+      break;
+
+    case 'awaiting_confirmation':
+      stopPolling();
+      if (job.checkpoint_type === 'text_review') renderTextReview(job);
+      else if (job.checkpoint_type === 'voice_selection') renderVoiceSelection(job);
+      else if (job.checkpoint_type === 'media_selection') renderMediaSelection(job);
+      break;
+
+    case 'completed':
+      stopPolling();
+      showDone(job.output_url);
+      break;
+  }
+}
+
+function stepMsg(step) {
+  const msgs = {
+    extracting_text: 'Đang nhận diện chữ trong ảnh...',
+    generating_voices: 'Đang tạo giọng đọc (6 giọng × mỗi ảnh)...',
+    selecting_media: 'Đang tìm media từ thư viện...',
+    composing_video: 'Đang ghép video...',
+  };
+  return msgs[step] || 'Đang xử lý...';
+}
+
+// ============================================================
+// Step 2: Text Review
+// ============================================================
+function renderTextReview(job) {
+  setStepActive(2);
+  const texts = job.extracted_texts || [];
+  const container = document.getElementById('text-cards');
+  container.innerHTML = texts.map(t => {
+    const img = job.images ? (job.images.find(i => i.index === t.image_index) || {}) : {};
+    const label = t.image_index === 0 ? 'Câu hỏi' : `Câu trả lời ${t.image_index}`;
+    const badge = t.image_index === 0 ? 'badge-question' : 'badge-answer';
+    return `<div class="text-card">
+      <img src="/api/v1/jobs/${jobId}/image/${t.image_index}"
+           onerror="this.style.background='#333';this.removeAttribute('src')"
+           alt="${label}">
+      <div>
+        <div class="card-label">
+          <span class="badge ${badge}">${label}</span>
+        </div>
+        <textarea id="text-${t.image_index}" rows="4">${t.text}</textarea>
+      </div>
+    </div>`;
+  }).join('');
+  showView('text-review');
+}
+
+async function confirmText() {
+  const textEls = document.querySelectorAll('[id^="text-"]');
+  const texts = [...textEls].map(el => ({
+    image_index: parseInt(el.id.replace('text-', '')),
+    text: el.value,
+  }));
+
+  setStepActive(2);
+  showView('processing');
+  updateProgress(25, 'Đang tạo giọng đọc...');
+
+  try {
+    const res = await fetch(`/api/v1/jobs/${jobId}/confirm/text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texts }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Lỗi xác nhận');
+    startPolling();
+  } catch (err) {
+    showToast('❌ ' + err.message);
+  }
+}
+
+// ============================================================
+// Step 3: Voice Selection
+// ============================================================
+let voiceSelections = {}; // {image_index: voice_id}
+
+function renderVoiceSelection(job) {
+  setStepActive(3);
+  const segments = job.voice_options_per_segment || [];
+  voiceSelections = {};
+
+  // Default: pick first available voice for each
+  segments.forEach(seg => {
+    if (seg.options && seg.options.length > 0) {
+      voiceSelections[seg.image_index] = seg.options[0].voice_id;
+    }
+  });
+
+  const container = document.getElementById('voice-cards');
+  container.innerHTML = segments.map(seg => {
+    const label = seg.image_index === 0 ? 'Câu hỏi' : `Câu trả lời ${seg.image_index}`;
+    const badge = seg.image_index === 0 ? 'badge-question' : 'badge-answer';
+    const voiceOpts = VOICES.map(v =>
+      `<option value="${v.id}" ${voiceSelections[seg.image_index] === v.id ? 'selected' : ''}>${v.name}</option>`
+    ).join('');
+    const firstAudio = seg.options && seg.options.length > 0 ? seg.options[0].audio_path : null;
+
+    return `<div class="voice-card">
+      <div class="top">
+        <img src="/api/v1/jobs/${jobId}/image/${seg.image_index}"
+             onerror="this.style.background='#333';this.removeAttribute('src')" alt="${label}">
+        <div class="info">
+          <div style="margin-bottom:8px"><span class="badge ${badge}">${label}</span></div>
+          <div class="seg-text">${seg.text}</div>
+          <div class="voice-controls">
+            <select class="voice-select" id="voice-sel-${seg.image_index}"
+              onchange="voiceSelections[${seg.image_index}]=this.value">
+              ${voiceOpts}
+            </select>
+            <button class="btn btn-sm btn-secondary"
+              onclick="playVoicePreview(${seg.image_index}, ${JSON.stringify(seg.options || []).replace(/"/g,'&quot;')})">
+              ▶ Nghe thử
+            </button>
+            <span id="play-status-${seg.image_index}" style="font-size:12px;color:#666"></span>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  showView('voice');
+}
+
+function playVoicePreview(imageIndex, options) {
+  const selectedVoiceId = document.getElementById(`voice-sel-${imageIndex}`).value;
+  const statusEl = document.getElementById(`play-status-${imageIndex}`);
+
+  // Find matching pre-generated audio
+  const opt = options.find(o => o.voice_id === selectedVoiceId);
+  if (!opt) { statusEl.textContent = 'Không có audio'; return; }
+
+  // audio_path is a full path on server, extract filename
+  const filename = opt.audio_path.split(/[\\/]/).pop();
+  const audioUrl = `/api/v1/jobs/${jobId}/audio/${filename}`;
+
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  document.querySelectorAll('[id^="play-status-"]').forEach(el => el.textContent = '');
+
+  statusEl.textContent = '⏳ Loading...';
+  const audio = new Audio(audioUrl);
+  currentAudio = audio;
+  audio.play().then(() => {
+    statusEl.textContent = '▶ Đang phát';
+    audio.onended = () => { statusEl.textContent = ''; currentAudio = null; };
+  }).catch(() => {
+    statusEl.textContent = '❌ Lỗi';
+  });
+}
+
+async function confirmVoices() {
+  const voices = Object.entries(voiceSelections).map(([idx, vid]) => ({
+    image_index: parseInt(idx),
+    voice_id: vid,
+  }));
+
+  if (!voices.length) { showToast('Chưa chọn giọng nào'); return; }
+
+  setStepActive(3);
+  showView('processing');
+  updateProgress(50, 'Đang tìm media...');
+
+  try {
+    const res = await fetch(`/api/v1/jobs/${jobId}/confirm/voices`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voices }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Lỗi xác nhận');
+    startPolling();
+  } catch (err) {
+    showToast('❌ ' + err.message);
+  }
+}
+
+// ============================================================
+// Step 4: Media Selection
+// ============================================================
+function renderMediaSelection(job) {
+  setStepActive(4);
+  selectedMedia = { bg: null, gif: null, sound: null };
+  const opts = job.media_options || {};
+
+  renderMediaGrid('bg-grid', opts.background_options || [], 'bg', 'background');
+  renderMediaGrid('gif-grid', opts.gif_options || [], 'gif', 'gif');
+  renderMediaGrid('sound-grid', opts.sound_options || [], 'sound', 'sound');
+
+  showView('media');
+}
+
+function renderMediaGrid(containerId, options, selKey, type) {
+  const container = document.getElementById(containerId);
+  if (!options.length) {
+    container.innerHTML = `<div class="no-media-msg">Không có media trong thư viện (bucket trống)</div>`;
+    return;
+  }
+
+  container.innerHTML = options.map((opt, i) => {
+    const proxyUrl = `/api/v1/media/preview/${opt.bucket}/${opt.key}`;
+    const filename = opt.key.split('/').pop();
+    let preview = '';
+
+    const ext = filename.split('.').pop().toLowerCase();
+    if (type === 'sound' || ['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) {
+      preview = `<div style="padding:12px"><audio controls src="${proxyUrl}" style="width:100%"></audio></div>`;
+    } else if (['mp4', 'webm', 'mov'].includes(ext)) {
+      preview = `<video src="${proxyUrl}" muted loop autoplay style="width:100%;height:100px;object-fit:cover"></video>`;
+    } else if (['gif', 'webp', 'png', 'jpg', 'jpeg'].includes(ext)) {
+      preview = `<img src="${proxyUrl}" alt="${filename}" loading="lazy">`;
+    } else {
+      preview = `<div class="media-none">📄 ${filename}</div>`;
+    }
+
+    return `<div class="media-option" id="media-${selKey}-${i}" onclick="selectMedia('${selKey}','${opt.bucket}','${opt.key}',${i})">
+      ${preview}
+      <div class="media-label">${filename}</div>
+    </div>`;
+  }).join('');
+}
+
+function selectMedia(key, bucket, objKey, idx) {
+  // Deselect others in this group
+  document.querySelectorAll(`[id^="media-${key}-"]`).forEach(el => el.classList.remove('selected'));
+
+  const el = document.getElementById(`media-${key}-${idx}`);
+  if (selectedMedia[key]?.key === objKey) {
+    // Toggle off (deselect)
+    selectedMedia[key] = null;
+  } else {
+    el.classList.add('selected');
+    selectedMedia[key] = { bucket, key: objKey };
+  }
+}
+
+async function regenerateMedia() {
+  showView('processing');
+  updateProgress(55, 'Đang tải lại media...');
+  try {
+    const res = await fetch(`/api/v1/jobs/${jobId}/regenerate/media`, { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Lỗi');
+    startPolling();
+  } catch (err) {
+    showToast('❌ ' + err.message);
+  }
+}
+
+async function confirmMedia() {
+  const body = {};
+  if (selectedMedia.bg) {
+    body.background_bucket = selectedMedia.bg.bucket;
+    body.background_key = selectedMedia.bg.key;
+  }
+  if (selectedMedia.gif) {
+    body.gif_bucket = selectedMedia.gif.bucket;
+    body.gif_key = selectedMedia.gif.key;
+  }
+  if (selectedMedia.sound) {
+    body.sound_bucket = selectedMedia.sound.bucket;
+    body.sound_key = selectedMedia.sound.key;
+  }
+
+  setStepActive(4);
+  showView('processing');
+  updateProgress(65, 'Đang tạo video...');
+
+  try {
+    const res = await fetch(`/api/v1/jobs/${jobId}/confirm/media`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Lỗi xác nhận');
+    startPolling();
+  } catch (err) {
+    showToast('❌ ' + err.message);
+  }
+}
+
+// ============================================================
+// Step 5: Done
+// ============================================================
+function showDone(outputUrl) {
+  setStepActive(5);
+  const videoEl = document.getElementById('final-video');
+  const dlLink = document.getElementById('download-link');
+  videoEl.src = outputUrl;
+  dlLink.href = outputUrl;
+  showView('done');
+}
+
+// ============================================================
+// Reset
+// ============================================================
+function resetAll() {
+  jobId = null;
+  questionFile = null;
+  answerFiles = [];
+  selectedMedia = { bg: null, gif: null, sound: null };
+  voiceSelections = {};
+  stopPolling();
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  document.getElementById('preview-question').innerHTML = '';
+  document.getElementById('answer-list').innerHTML = '';
+  document.getElementById('input-question').value = '';
+  refreshStartBtn();
+  setStepActive(1);
+  showView('upload');
+}
+</script>
+
+</body>
+</html>
