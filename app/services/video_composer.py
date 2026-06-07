@@ -1,18 +1,13 @@
 """Video composer: vertical (9:16) video with full-screen MP4 background.
 
-Layout (1080x1920):
-  Background fills full screen.
-  Q/A images centered on top of background.
-  GIF/sound transitions between segments (gif overlaid full-screen, sound plays over bg).
-
-Audio mix:
-  - TTS / sound effects embedded in each clip
-  - After concat: background MP4 audio looped at low volume and mixed in
+Single-pass FFmpeg: background runs continuously, images overlay with time-gated
+enable expressions, transition gifs stack on top. Audio streams are delayed to their
+absolute timeline position then mixed.
 """
 
 import logging
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -20,9 +15,8 @@ logger = logging.getLogger(__name__)
 W = 1080
 H = 1920
 FPS = 24
-IMG_MAX_W = 1020  # max width for Q/A image overlay
-IMG_MAX_H = 680   # max height for Q/A image overlay
-IMG_TOP_PAD = 160 # pixels from top edge
+IMG_MAX_W = 1020
+IMG_MAX_H = 500
 
 
 @dataclass
@@ -35,8 +29,8 @@ class QASegment:
 @dataclass
 class TransitionConfig:
     duration: float = 2.0
-    gif_path: Path | None = None   # visual (gif/mp4) — mutually exclusive with sound_path
-    sound_path: Path | None = None  # audio-only transition
+    gif_path: Path | None = None
+    sound_path: Path | None = None
 
 
 class VideoComposerError(Exception):
@@ -55,7 +49,7 @@ class VideoComposer:
     def compose(
         self,
         segments: list[QASegment],
-        transitions: list[TransitionConfig],  # len == len(segments) - 1
+        transitions: list[TransitionConfig],
         background_video_path: Path | None,
         output_path: Path,
         work_dir: Path,
@@ -63,194 +57,190 @@ class VideoComposer:
         if not segments:
             raise VideoComposerError("No segments to compose")
 
-        clips_dir = work_dir / "clips"
-        clips_dir.mkdir(parents=True, exist_ok=True)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        clip_paths: list[Path] = []
+        # ── Timeline ──────────────────────────────────────────────────────────
+        seg_starts: list[float] = []
+        trans_starts: list[float] = []
+        t = 0.0
         for i, seg in enumerate(segments):
-            clip = clips_dir / f"qa_{i:03d}.mp4"
-            self._make_qa_clip(seg, clip, background_video_path)
-            clip_paths.append(clip)
+            seg_starts.append(t)
+            t += seg.duration
+            if i < len(transitions):
+                trans_starts.append(t)
+                t += transitions[i].duration
+        total_dur = t
 
-            if i < len(segments) - 1:
-                t = transitions[i] if i < len(transitions) else TransitionConfig(duration=self._trans_dur)
-                trans = clips_dir / f"trans_{i:03d}.mp4"
-                self._make_transition_clip(t, trans, background_video_path)
-                clip_paths.append(trans)
+        # Each image is visible from its segment start until the NEXT segment
+        # starts (i.e., it stays on screen through the following transition).
+        img_vis_end = [
+            seg_starts[i + 1] if i + 1 < len(segments) else total_dur
+            for i in range(len(segments))
+        ]
 
-        concat_path = work_dir / "concat.mp4"
-        self._concat(clip_paths, concat_path)
-
-        concat_path.rename(output_path)
-
-        return output_path
-
-    # ------------------------------------------------------------------
-    # Q/A clip: full-screen bg, image centered on top
-    # ------------------------------------------------------------------
-
-    def _make_qa_clip(self, seg: QASegment, out: Path, bg: Path | None) -> None:
-        duration = max(seg.duration, 0.5)
-
-        # Image: scale to fit within full width, capped at IMG_MAX_H, positioned near top
-        img_filter = (
-            f"scale={IMG_MAX_W}:{IMG_MAX_H}:force_original_aspect_ratio=decrease,setsar=1"
-        )
-        img_overlay = f"overlay=(main_w-overlay_w)/2:{IMG_TOP_PAD}"
-
-        if bg:
-            filter_complex = (
-                f"[0:v]scale=-2:{H},crop={W}:{H},setsar=1,fps={FPS}[bg];"
-                f"[1:v]{img_filter}[img];"
-                f"[bg][img]{img_overlay}[v];"
-                f"[2:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
-            )
-            cmd = [
-                "ffmpeg", "-y",
-                "-stream_loop", "-1", "-i", str(bg),
-                "-loop", "1", "-i", str(seg.image_path),
-                "-i", str(seg.audio_path),
-                "-filter_complex", filter_complex,
-                "-map", "[v]", "-map", "[a]",
-                "-t", str(duration),
-                *self._encode_args(),
-                str(out),
-            ]
-        else:
-            filter_complex = (
-                f"color=black:size={W}x{H}:rate={FPS}[bg];"
-                f"[0:v]{img_filter}[img];"
-                f"[bg][img]{img_overlay}[v];"
-                f"[1:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
-            )
-            cmd = [
-                "ffmpeg", "-y",
-                "-loop", "1", "-i", str(seg.image_path),
-                "-i", str(seg.audio_path),
-                "-filter_complex", filter_complex,
-                "-map", "[v]", "-map", "[a]",
-                "-t", str(duration),
-                *self._encode_args(),
-                str(out),
-            ]
-
-        self._run(cmd, f"qa_clip {out.name}")
-
-    # ------------------------------------------------------------------
-    # Transition clip: either gif overlay or sound over bg
-    # ------------------------------------------------------------------
-
-    def _make_transition_clip(
-        self, transition: TransitionConfig, out: Path, bg: Path | None
-    ) -> None:
-        duration = transition.duration
-        inputs: list[str] = []
-        filter_parts: list[str] = []
+        # ── Inputs ────────────────────────────────────────────────────────────
+        input_args: list[str] = []
         next_idx = 0
 
-        # Background layer
-        if bg:
-            inputs += ["-stream_loop", "-1", "-i", str(bg)]
-            filter_parts.append(
-                f"[{next_idx}:v]scale=-2:{H},crop={W}:{H},setsar=1,fps={FPS}[vbg]"
-            )
+        # Background
+        bg_vidx: int | None = None
+        if background_video_path:
+            input_args += ["-stream_loop", "-1", "-i", str(background_video_path)]
+            bg_vidx = next_idx
             next_idx += 1
-        else:
-            filter_parts.append(f"color=black:size={W}x{H}:rate={FPS}[vbg]")
 
-        # Visual: gif overlay (centered)
-        gif_input_idx: int | None = None
-        if transition.gif_path:
-            gif_input_idx = next_idx
-            inputs += ["-stream_loop", "-1", "-i", str(transition.gif_path)]
-            filter_parts.append(
-                f"[{next_idx}:v]scale={W}:{H}:force_original_aspect_ratio=decrease,"
-                f"setsar=1,fps={FPS}[gif]"
-            )
-            filter_parts.append("[vbg][gif]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2[v]")
+        # Images (looped stills)
+        img_vidx: list[int] = []
+        for seg in segments:
+            input_args += ["-loop", "1", "-i", str(seg.image_path)]
+            img_vidx.append(next_idx)
             next_idx += 1
+
+        # Transition gifs
+        gif_vidx: list[int | None] = []
+        for trans in transitions:
+            if trans.gif_path:
+                input_args += ["-stream_loop", "-1", "-i", str(trans.gif_path)]
+                gif_vidx.append(next_idx)
+                next_idx += 1
+            else:
+                gif_vidx.append(None)
+
+        # Transition sounds
+        sound_aidx: list[int | None] = []
+        for trans in transitions:
+            if trans.sound_path:
+                input_args += ["-i", str(trans.sound_path)]
+                sound_aidx.append(next_idx)
+                next_idx += 1
+            else:
+                sound_aidx.append(None)
+
+        # TTS audio (separate inputs from the images)
+        tts_aidx: list[int] = []
+        for seg in segments:
+            input_args += ["-i", str(seg.audio_path)]
+            tts_aidx.append(next_idx)
+            next_idx += 1
+
+        # ── filter_complex ────────────────────────────────────────────────────
+        fp: list[str] = []
+
+        # Background video: fill height, crop width, run continuously
+        if bg_vidx is not None:
+            fp.append(
+                f"[{bg_vidx}:v]scale=-2:{H},crop={W}:{H},setsar=1,fps={FPS}[vbg]"
+            )
         else:
-            filter_parts.append("[vbg]null[v]")
-
-        # Audio: sound file > gif's own audio > silence
-        if transition.sound_path:
-            inputs += ["-i", str(transition.sound_path)]
-            filter_parts.append(
-                f"[{next_idx}:a]aresample=44100,"
-                f"aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
-            )
-        elif gif_input_idx is not None and self._has_audio(transition.gif_path):
-            filter_parts.append(
-                f"[{gif_input_idx}:a]aresample=44100,"
-                f"aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
-            )
-        else:
-            filter_parts.append(
-                "anullsrc=channel_layout=stereo:sample_rate=44100[a]"
+            fp.append(
+                f"color=black:size={W}x{H}:rate={FPS}:duration={total_dur}[vbg]"
             )
 
-        cmd = [
-            "ffmpeg", "-y",
-            *inputs,
-            "-filter_complex", ";".join(filter_parts),
-            "-map", "[v]", "-map", "[a]",
-            "-t", str(duration),
-            *self._encode_args(),
-            str(out),
-        ]
-        self._run(cmd, f"transition {out.name}")
-
-    # ------------------------------------------------------------------
-    # Concat + audio mix
-    # ------------------------------------------------------------------
-
-    def _concat(self, clips: list[Path], out: Path) -> None:
-        list_file = out.parent / "concat_list.txt"
-        list_file.write_text(
-            "\n".join(f"file '{p.absolute()}'" for p in clips),
-            encoding="utf-8",
+        # Overlay each QA image for [seg_start, img_vis_end] (stays through transition)
+        prev_v = "vbg"
+        img_scale = (
+            f"scale={IMG_MAX_W}:{IMG_MAX_H}"
+            f":force_original_aspect_ratio=decrease,setsar=1"
         )
+        for i in range(len(segments)):
+            vin = f"imgraw{i}"
+            vout = f"vimgd{i}"
+            vs = seg_starts[i]
+            ve = img_vis_end[i]
+            fp.append(f"[{img_vidx[i]}:v]{img_scale}[{vin}]")
+            fp.append(
+                f"[{prev_v}][{vin}]overlay=(main_w-overlay_w)/2:640-overlay_h/2"
+                f":enable='between(t,{vs},{ve})'[{vout}]"
+            )
+            prev_v = vout
+
+        # Overlay transition gifs on top of the image layer
+        for i, trans in enumerate(transitions):
+            if gif_vidx[i] is not None:
+                gin = f"gifraw{i}"
+                gout = f"vgifd{i}"
+                ts = trans_starts[i]
+                te = ts + trans.duration
+                fp.append(
+                    f"[{gif_vidx[i]}:v]scale={W}:{H}"
+                    f":force_original_aspect_ratio=decrease,setsar=1,fps={FPS}[{gin}]"
+                )
+                fp.append(
+                    f"[{prev_v}][{gin}]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2"
+                    f":enable='between(t,{ts},{te})'[{gout}]"
+                )
+                prev_v = gout
+
+        fp.append(f"[{prev_v}]setpts=PTS-STARTPTS[vout]")
+
+        # Audio: delay each stream to its absolute timeline position then mix
+        a_labels: list[str] = []
+
+        for i in range(len(segments)):
+            delay_ms = int(seg_starts[i] * 1000)
+            al = f"atts{i}"
+            fp.append(
+                f"[{tts_aidx[i]}:a]aresample=44100"
+                f",aformat=sample_fmts=fltp:channel_layouts=stereo"
+                f",adelay={delay_ms}|{delay_ms}[{al}]"
+            )
+            a_labels.append(f"[{al}]")
+
+        for i, trans in enumerate(transitions):
+            delay_ms = int(trans_starts[i] * 1000)
+            trans_dur = trans.duration
+            if sound_aidx[i] is not None:
+                al = f"asound{i}"
+                fp.append(
+                    f"[{sound_aidx[i]}:a]aresample=44100"
+                    f",aformat=sample_fmts=fltp:channel_layouts=stereo"
+                    f",atrim=duration={trans_dur}"
+                    f",adelay={delay_ms}|{delay_ms}[{al}]"
+                )
+                a_labels.append(f"[{al}]")
+            elif gif_vidx[i] is not None and self._has_audio(trans.gif_path):
+                al = f"agif{i}"
+                fp.append(
+                    f"[{gif_vidx[i]}:a]aresample=44100"
+                    f",aformat=sample_fmts=fltp:channel_layouts=stereo"
+                    f",atrim=duration={trans_dur}"
+                    f",adelay={delay_ms}|{delay_ms}[{al}]"
+                )
+                a_labels.append(f"[{al}]")
+
+        if len(a_labels) > 1:
+            fp.append(
+                f"{''.join(a_labels)}"
+                f"amix=inputs={len(a_labels)}:duration=longest:dropout_transition=0[aout]"
+            )
+        elif len(a_labels) == 1:
+            fp.append(f"{a_labels[0]}acopy[aout]")
+        else:
+            fp.append("anullsrc=channel_layout=stereo:sample_rate=44100[aout]")
+
+        # ── Encode ────────────────────────────────────────────────────────────
         cmd = [
             "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0", "-i", str(list_file),
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-            "-c:a", "aac", "-ar", "44100",
-            str(out),
+            *input_args,
+            "-filter_complex", ";".join(fp),
+            "-map", "[vout]", "-map", "[aout]",
+            "-t", str(total_dur),
+            *self._encode_args(),
+            str(output_path),
         ]
-        self._run(cmd, "concat")
+        self._run(cmd, "compose_all")
+        return output_path
 
-    def _extract_audio(self, video: Path, out: Path) -> None:
-        cmd = [
-            "ffmpeg", "-y", "-i", str(video),
-            "-vn", "-acodec", "aac", "-ar", "44100",
-            str(out),
-        ]
-        self._run(cmd, "extract_bg_audio")
-
-    def _mix_bg_audio(self, video: Path, bg_audio: Path, out: Path) -> None:
-        vol = self._bg_vol
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(video),
-            "-stream_loop", "-1", "-i", str(bg_audio),
-            "-filter_complex",
-            f"[1:a]volume={vol}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=0[a]",
-            "-map", "0:v", "-map", "[a]",
-            "-c:v", "copy", "-c:a", "aac",
-            str(out),
-        ]
-        self._run(cmd, "mix_bg_audio")
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
+    # ── Helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod
     def _has_audio(video: Path) -> bool:
         result = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
-             "stream=codec_type", "-of", "csv=p=0", str(video)],
+            [
+                "ffprobe", "-v", "error", "-select_streams", "a",
+                "-show_entries", "stream=codec_type", "-of", "csv=p=0",
+                str(video),
+            ],
             capture_output=True, text=True, timeout=30,
         )
         return bool(result.stdout.strip())
@@ -269,5 +259,5 @@ class VideoComposer:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if result.returncode != 0:
             raise VideoComposerError(
-                f"FFmpeg [{label}] failed:\n{result.stderr[-800:]}"
+                f"FFmpeg [{label}] failed:\n{result.stderr[-1200:]}"
             )
