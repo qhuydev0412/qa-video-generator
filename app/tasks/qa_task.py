@@ -83,8 +83,8 @@ def extract_texts_task(self, job_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-_DEFAULT_VOICE_ID = "alloy"
-_DEFAULT_VOICE_NAME = "Alloy (Trung tính)"
+_DEFAULT_VOICE_ID = "shimmer"
+_DEFAULT_VOICE_NAME = "Shimmer (Nữ, nhẹ)"
 
 
 @shared_task(bind=True, name="qa.generate_voices")
