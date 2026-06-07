@@ -11,8 +11,6 @@ from app.models.job import (
     CheckpointType,
     ExtractedText,
     JobStatus,
-    MediaOptions,
-    MinioMedia,
     PipelineStep,
     SegmentVoiceOptions,
     VoicePreview,
@@ -83,8 +81,8 @@ def extract_texts_task(self, job_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-_DEFAULT_VOICE_ID = "shimmer"
-_DEFAULT_VOICE_NAME = "Shimmer (Nữ, nhẹ)"
+_DEFAULT_VOICE_ID = "nova"
+_DEFAULT_VOICE_NAME = "Nova (Nữ, ấm)"
 
 
 @shared_task(bind=True, name="qa.generate_voices")
@@ -179,6 +177,7 @@ def select_media_task(self, job_id: str) -> None:
     )
 
     try:
+        job = store.get_job(job_id)
         minio = MinioClient(
             endpoint=settings.MINIO_ENDPOINT,
             access_key=settings.MINIO_ACCESS_KEY,
@@ -187,11 +186,12 @@ def select_media_task(self, job_id: str) -> None:
         )
         selector = MediaSelector(minio)
 
+        n_transitions = max(len(job.voice_options_per_segment) - 1, 0)
         options = selector.pick_options(
             backgrounds_bucket=settings.MINIO_BUCKET_BACKGROUNDS,
             gifs_bucket=settings.MINIO_BUCKET_GIFS,
             sounds_bucket=settings.MINIO_BUCKET_SOUNDS,
-            n=3,
+            n_transitions=n_transitions,
         )
 
         store.update_job(job_id, media_options=options, progress_percent=65)
@@ -230,7 +230,7 @@ def compose_video_task(self, job_id: str) -> None:
             if seg.selected_audio_path
         }
 
-        from app.services.video_composer import QASegment, TransitionConfig, VideoComposer
+        from app.services.video_composer import QASegment, TransitionConfig, VideoComposer  # noqa: PLC0415
 
         segments: list[QASegment] = []
         for img in sorted(job.images, key=lambda x: x.index):
@@ -261,32 +261,35 @@ def compose_video_task(self, job_id: str) -> None:
             secure=settings.MINIO_SECURE,
         )
 
+        media_dir = work_dir / "media"
+        media_dir.mkdir(parents=True, exist_ok=True)
+
         media = job.media_selection
-        gif_path: Path | None = None
-        sound_path: Path | None = None
         bg_video_path: Path | None = None
 
+        if media and media.background and media.background.key:
+            bg_ext = Path(media.background.key).suffix
+            bg_video_path = media_dir / f"background{bg_ext}"
+            minio.download(media.background.bucket, media.background.key, bg_video_path)
+
+        # Download per-transition assets
+        transitions: list[TransitionConfig] = []
         if media:
-            if media.gif and media.gif.key:
-                gif_path = work_dir / "media" / f"meme{Path(media.gif.key).suffix}"
-                minio.download(media.gif.bucket, media.gif.key, gif_path)
+            for i, t_asset in enumerate(media.transitions):
+                ext = Path(t_asset.key).suffix
+                dl_path = media_dir / f"trans_{i:03d}{ext}"
+                minio.download(t_asset.bucket, t_asset.key, dl_path)
 
-            if media.sound and media.sound.key:
-                sound_path = work_dir / "media" / f"sound{Path(media.sound.key).suffix}"
-                minio.download(media.sound.bucket, media.sound.key, sound_path)
-
-            if media.background and media.background.key:
-                bg_ext = Path(media.background.key).suffix
-                bg_video_path = work_dir / "media" / f"background{bg_ext}"
-                minio.download(media.background.bucket, media.background.key, bg_video_path)
+                is_gif = t_asset.media_type == "gif" or ext.lower() in {".mp4", ".gif", ".webm", ".mov"}
+                transitions.append(
+                    TransitionConfig(
+                        duration=settings.TRANSITION_DURATION,
+                        gif_path=dl_path if is_gif else None,
+                        sound_path=dl_path if not is_gif else None,
+                    )
+                )
 
         store.update_job(job_id, progress_percent=75)
-
-        transition = TransitionConfig(
-            gif_path=gif_path,
-            sound_path=sound_path,
-            duration=settings.TRANSITION_DURATION,
-        )
 
         output_dir = work_dir / "output"
         output_path = output_dir / "final.mp4"
@@ -297,7 +300,7 @@ def compose_video_task(self, job_id: str) -> None:
         )
         composer.compose(
             segments=segments,
-            transition=transition,
+            transitions=transitions,
             background_video_path=bg_video_path,
             output_path=output_path,
             work_dir=work_dir,

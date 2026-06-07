@@ -88,6 +88,9 @@ select.voice-select:focus { outline: none; border-color: #6366f1; }
 .media-option .media-label { font-size: 11px; padding: 6px 8px; color: #aaa; word-break: break-all; }
 .media-none { display: flex; align-items: center; justify-content: center; height: 100px; color: #444; font-size: 13px; }
 .no-media-msg { color: #666; font-size: 13px; padding: 8px 0; }
+.pool-badge { position: absolute; top: 4px; right: 4px; background: #6366f1; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; z-index: 1; pointer-events: none; }
+.slot-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.transition-hint { font-size: 12px; color: #888; margin-bottom: 8px; }
 
 /* Progress */
 .progress-bar { background: #2a2a2a; border-radius: 8px; height: 8px; overflow: hidden; margin: 12px 0; }
@@ -217,18 +220,13 @@ select.voice-select:focus { outline: none; border-color: #6366f1; }
       <p style="font-size:13px;color:#888;margin-bottom:20px">Chọn background, GIF và âm thanh cho video</p>
 
       <div class="media-section">
-        <h3>🖼️ Background / Nhạc nền</h3>
+        <h3>🖼️ Background video</h3>
         <div class="media-grid" id="bg-grid"></div>
       </div>
 
       <div class="media-section">
-        <h3>😂 Meme GIF (hiển thị giữa các câu)</h3>
-        <div class="media-grid" id="gif-grid"></div>
-      </div>
-
-      <div class="media-section">
-        <h3>🔊 Âm thanh hiệu ứng</h3>
-        <div class="media-grid" id="sound-grid"></div>
+        <h3>🎬 Hiệu ứng chuyển cảnh</h3>
+        <div id="transition-section"></div>
       </div>
     </div>
     <div class="actions">
@@ -264,7 +262,11 @@ let jobId = null;
 let pollTimer = null;
 let questionFile = null;
 let answerFiles = [];
-let selectedMedia = { bg: null, gif: null, sound: null };
+let selectedMedia = { bg: null };
+let transitionPool = [];
+let transitionAssignments = [];
+let activeSlotIdx = 0;
+let nTransitions = 0;
 
 const VOICES = [
   { id: 'alloy',   name: 'Alloy (Trung tính)' },
@@ -651,13 +653,21 @@ async function confirmVoices() {
 // ============================================================
 function renderMediaSelection(job) {
   setStepActive(4);
-  selectedMedia = { bg: null, gif: null, sound: null };
+  selectedMedia = { bg: null };
   const opts = job.media_options || {};
 
-  renderMediaGrid('bg-grid', opts.background_options || [], 'bg', 'background');
-  renderMediaGrid('gif-grid', opts.gif_options || [], 'gif', 'gif');
-  renderMediaGrid('sound-grid', opts.sound_options || [], 'sound', 'sound');
+  transitionPool = opts.transition_pool || [];
+  nTransitions = (job.voice_options_per_segment || []).length > 0
+    ? Math.max((job.voice_options_per_segment || []).length - 1, 0)
+    : 0;
+  // Auto-assign: cycle through pool for each slot
+  transitionAssignments = Array.from({ length: nTransitions }, (_, i) =>
+    transitionPool.length > 0 ? i % transitionPool.length : -1
+  );
+  activeSlotIdx = 0;
 
+  renderMediaGrid('bg-grid', opts.background_options || [], 'bg', 'background');
+  renderTransitionSection();
   showView('media');
 }
 
@@ -667,13 +677,11 @@ function renderMediaGrid(containerId, options, selKey, type) {
     container.innerHTML = `<div class="no-media-msg">Không có media trong thư viện (bucket trống)</div>`;
     return;
   }
-
   container.innerHTML = options.map((opt, i) => {
     const proxyUrl = `/api/v1/media/preview/${opt.bucket}/${opt.key}`;
     const filename = opt.key.split('/').pop();
-    let preview = '';
-
     const ext = filename.split('.').pop().toLowerCase();
+    let preview = '';
     if (type === 'sound' || ['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) {
       preview = `<div style="padding:12px"><audio controls src="${proxyUrl}" style="width:100%"></audio></div>`;
     } else if (['mp4', 'webm', 'mov'].includes(ext)) {
@@ -683,7 +691,6 @@ function renderMediaGrid(containerId, options, selKey, type) {
     } else {
       preview = `<div class="media-none">📄 ${filename}</div>`;
     }
-
     return `<div class="media-option" id="media-${selKey}-${i}" onclick="selectMedia('${selKey}','${opt.bucket}','${opt.key}',${i})">
       ${preview}
       <div class="media-label">${filename}</div>
@@ -692,17 +699,72 @@ function renderMediaGrid(containerId, options, selKey, type) {
 }
 
 function selectMedia(key, bucket, objKey, idx) {
-  // Deselect others in this group
   document.querySelectorAll(`[id^="media-${key}-"]`).forEach(el => el.classList.remove('selected'));
-
   const el = document.getElementById(`media-${key}-${idx}`);
   if (selectedMedia[key]?.key === objKey) {
-    // Toggle off (deselect)
     selectedMedia[key] = null;
   } else {
     el.classList.add('selected');
     selectedMedia[key] = { bucket, key: objKey };
   }
+}
+
+function renderTransitionSection() {
+  const container = document.getElementById('transition-section');
+  if (nTransitions === 0) {
+    container.innerHTML = '<p class="no-media-msg">Video chỉ có 1 ảnh, không cần chuyển cảnh</p>';
+    return;
+  }
+  if (!transitionPool.length) {
+    container.innerHTML = '<p class="no-media-msg">Không có gif/sound trong thư viện</p>';
+    return;
+  }
+
+  const slotBtns = Array.from({ length: nTransitions }, (_, i) => {
+    const assignedName = transitionAssignments[i] >= 0
+      ? transitionPool[transitionAssignments[i]].key.split('/').pop().slice(0, 14)
+      : '—';
+    return `<button class="btn btn-sm ${i === activeSlotIdx ? 'btn-primary' : 'btn-secondary'}"
+      onclick="setActiveSlot(${i})">Cảnh ${i + 1}: ${assignedName}</button>`;
+  }).join('');
+
+  const poolHtml = transitionPool.map((item, i) => {
+    const isActive = transitionAssignments[activeSlotIdx] === i;
+    const assignedTo = transitionAssignments.indexOf(i);
+    const proxyUrl = `/api/v1/media/preview/${item.bucket}/${item.key}`;
+    const filename = item.key.split('/').pop();
+    const ext = filename.split('.').pop().toLowerCase();
+    let preview = '';
+    if (['mp4', 'webm', 'mov', 'gif'].includes(ext)) {
+      preview = `<video src="${proxyUrl}" muted loop autoplay style="width:100%;height:80px;object-fit:cover"></video>`;
+    } else if (['mp3', 'wav', 'ogg'].includes(ext)) {
+      preview = `<div style="padding:8px"><audio controls src="${proxyUrl}" style="width:100%"></audio></div>`;
+    } else {
+      preview = `<div class="media-none">📄</div>`;
+    }
+    const badge = assignedTo >= 0
+      ? `<div class="pool-badge">Cảnh ${assignedTo + 1}</div>` : '';
+    return `<div class="media-option ${isActive ? 'selected' : ''}" style="position:relative" onclick="assignToSlot(${i})">
+      ${badge}${preview}
+      <div class="media-label">${filename}</div>
+    </div>`;
+  }).join('');
+
+  container.innerHTML = `
+    <p class="transition-hint">Chọn ô chuyển cảnh, sau đó nhấn asset để gán:</p>
+    <div class="slot-row">${slotBtns}</div>
+    <div class="media-grid">${poolHtml}</div>`;
+}
+
+function setActiveSlot(idx) {
+  activeSlotIdx = idx;
+  renderTransitionSection();
+}
+
+function assignToSlot(poolIdx) {
+  transitionAssignments[activeSlotIdx] = poolIdx;
+  if (activeSlotIdx < nTransitions - 1) activeSlotIdx++;
+  renderTransitionSection();
 }
 
 async function regenerateMedia() {
@@ -723,14 +785,13 @@ async function confirmMedia() {
     body.background_bucket = selectedMedia.bg.bucket;
     body.background_key = selectedMedia.bg.key;
   }
-  if (selectedMedia.gif) {
-    body.gif_bucket = selectedMedia.gif.bucket;
-    body.gif_key = selectedMedia.gif.key;
-  }
-  if (selectedMedia.sound) {
-    body.sound_bucket = selectedMedia.sound.bucket;
-    body.sound_key = selectedMedia.sound.key;
-  }
+  // Build transitions list from assignments
+  body.transitions = transitionAssignments
+    .filter(idx => idx >= 0 && idx < transitionPool.length)
+    .map(idx => {
+      const item = transitionPool[idx];
+      return { bucket: item.bucket, key: item.key, media_type: item.media_type };
+    });
 
   setStepActive(4);
   showView('processing');
@@ -792,7 +853,10 @@ function resetAll() {
   jobId = null;
   questionFile = null;
   answerFiles = [];
-  selectedMedia = { bg: null, gif: null, sound: null };
+  selectedMedia = { bg: null };
+  transitionPool = [];
+  transitionAssignments = [];
+  nTransitions = 0;
   stopPolling();
   document.getElementById('preview-question').innerHTML = '';
   document.getElementById('answer-list').innerHTML = '';

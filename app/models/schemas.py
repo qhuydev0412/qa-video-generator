@@ -48,13 +48,16 @@ class VoicePreviewRequest(BaseModel):
     voice_id: str
 
 
+class TransitionItem(BaseModel):
+    bucket: str
+    key: str
+    media_type: str  # "gif" or "sound"
+
+
 class MediaConfirmRequest(BaseModel):
     background_bucket: Optional[str] = None
     background_key: Optional[str] = None
-    gif_bucket: Optional[str] = None
-    gif_key: Optional[str] = None
-    sound_bucket: Optional[str] = None
-    sound_key: Optional[str] = None
+    transitions: list[TransitionItem] = []
 
 
 class CancelResponse(BaseModel):

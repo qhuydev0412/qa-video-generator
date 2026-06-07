@@ -69,14 +69,12 @@ class MinioMedia(BaseModel):
 
 class MediaOptions(BaseModel):
     background_options: list[MinioMedia] = Field(default_factory=list)
-    gif_options: list[MinioMedia] = Field(default_factory=list)
-    sound_options: list[MinioMedia] = Field(default_factory=list)
+    transition_pool: list[MinioMedia] = Field(default_factory=list)  # combined gif+sound pool
 
 
 class MediaSelection(BaseModel):
     background: Optional[MinioMedia] = None
-    gif: Optional[MinioMedia] = None
-    sound: Optional[MinioMedia] = None
+    transitions: list[MinioMedia] = Field(default_factory=list)  # one per transition slot
 
 
 class ErrorDetail(BaseModel):

@@ -26,6 +26,7 @@ from app.models.schemas import (
     JobStatusResponse,
     MediaConfirmRequest,
     TextConfirmRequest,
+    TransitionItem,
     VoicePreviewRequest,
 )
 from app.services.checkpoint_manager import (
@@ -356,16 +357,10 @@ def confirm_media(
             key=body.background_key or "",
             media_type="background",
         ) if body.background_key else None,
-        gif=MinioMedia(
-            bucket=body.gif_bucket or settings.MINIO_BUCKET_GIFS,
-            key=body.gif_key or "",
-            media_type="gif",
-        ) if body.gif_key else None,
-        sound=MinioMedia(
-            bucket=body.sound_bucket or settings.MINIO_BUCKET_SOUNDS,
-            key=body.sound_key or "",
-            media_type="sound",
-        ) if body.sound_key else None,
+        transitions=[
+            MinioMedia(bucket=t.bucket, key=t.key, media_type=t.media_type)
+            for t in body.transitions
+        ],
     )
 
     store.update_job(job_id, media_selection=selection)
