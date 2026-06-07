@@ -186,6 +186,7 @@ select.voice-select:focus { outline: none; border-color: #6366f1; }
       <div id="text-cards"></div>
     </div>
     <div class="actions">
+      <button class="btn btn-secondary" onclick="cancelAndReset()">← Quay lại</button>
       <button class="btn btn-primary" onclick="confirmText()">✅ Xác nhận nội dung →</button>
     </div>
   </div>
@@ -200,6 +201,7 @@ select.voice-select:focus { outline: none; border-color: #6366f1; }
       <div id="voice-cards"></div>
     </div>
     <div class="actions">
+      <button class="btn btn-secondary" onclick="goBack()">← Quay lại</button>
       <button class="btn btn-primary" onclick="confirmVoices()">✅ Xác nhận giọng đọc →</button>
     </div>
   </div>
@@ -228,6 +230,7 @@ select.voice-select:focus { outline: none; border-color: #6366f1; }
       </div>
     </div>
     <div class="actions">
+      <button class="btn btn-secondary" onclick="goBack()">← Quay lại</button>
       <button class="btn btn-secondary" onclick="regenerateMedia()">🔄 Tải lại options</button>
       <button class="btn btn-primary" onclick="confirmMedia()">✅ Tạo video →</button>
     </div>
@@ -243,6 +246,7 @@ select.voice-select:focus { outline: none; border-color: #6366f1; }
         <video id="final-video" controls></video>
       </div>
       <div class="download-section">
+        <button class="btn btn-secondary" onclick="goBack()">← Chọn lại media</button>
         <a id="download-link" class="btn btn-primary" download>⬇️ Tải về MP4</a>
         <button class="btn btn-secondary" onclick="resetAll()">🔁 Tạo video mới</button>
       </div>
@@ -754,6 +758,30 @@ function showDone(outputUrl) {
   videoEl.src = outputUrl;
   dlLink.href = outputUrl;
   showView('done');
+}
+
+// ============================================================
+// Cancel job and go back to upload
+// ============================================================
+async function cancelAndReset() {
+  if (jobId) {
+    await fetch(`/api/v1/jobs/${jobId}`, { method: 'DELETE' }).catch(() => {});
+  }
+  resetAll();
+}
+
+// ============================================================
+// Go back
+// ============================================================
+async function goBack() {
+  try {
+    const res = await fetch(`/api/v1/jobs/${jobId}/back`, { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Lỗi');
+    const job = await fetch(`/api/v1/jobs/${jobId}`).then(r => r.json());
+    handleJobState(job);
+  } catch (err) {
+    showToast('❌ ' + err.message);
+  }
 }
 
 // ============================================================

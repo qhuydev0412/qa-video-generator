@@ -177,20 +177,34 @@ def confirm_text(
     except ConfirmationInProgressError as exc:
         raise HTTPException(status_code=429, detail=str(exc))
 
-    # Apply text edits
     job = store.get_job(job_id)
-    text_map = {e.image_index: e.text for e in body.texts}
+    old_text_map = {t.image_index: t.text for t in job.extracted_texts}
+    new_text_map = {e.image_index: e.text for e in body.texts}
+
+    texts_changed = any(new_text_map.get(k) != v for k, v in old_text_map.items())
+
     updated = [
-        t.model_copy(update={"text": text_map.get(t.image_index, t.text), "confirmed": True})
+        t.model_copy(update={"text": new_text_map.get(t.image_index, t.text), "confirmed": True})
         for t in job.extracted_texts
     ]
     store.update_job(job_id, extracted_texts=updated)
-
     cp.release_and_resume(job_id)
+
+    # Nếu text không đổi và đã có voice options → nhảy thẳng đến voice selection
+    if not texts_changed and job.voice_options_per_segment:
+        store.update_job(
+            job_id,
+            status=JobStatus.AWAITING_CONFIRMATION,
+            checkpoint_type=CheckpointType.VOICE_SELECTION,
+        )
+        return CreateJobResponse(
+            job_id=job_id,
+            status=JobStatus.AWAITING_CONFIRMATION.value,
+            message="Nội dung không thay đổi, giữ nguyên giọng đọc",
+        )
 
     from app.tasks.qa_task import generate_voices_task
     generate_voices_task.delay(job_id)
-
     return CreateJobResponse(
         job_id=job_id,
         status=JobStatus.PROCESSING.value,
@@ -218,13 +232,15 @@ def confirm_voices(
         raise HTTPException(status_code=429, detail=str(exc))
 
     job = store.get_job(job_id)
-    voice_map = {v.image_index: v.voice_id for v in body.voices}
+    old_voice_map = {s.image_index: s.selected_voice_id for s in job.voice_options_per_segment}
+    new_voice_map = {v.image_index: v.voice_id for v in body.voices}
+
+    voices_changed = any(new_voice_map.get(k) != v for k, v in old_voice_map.items() if v)
 
     updated_segs = []
     for seg in job.voice_options_per_segment:
-        selected_voice_id = voice_map.get(seg.image_index)
+        selected_voice_id = new_voice_map.get(seg.image_index)
         if selected_voice_id:
-            # Find the pre-generated audio for this voice
             audio_path = next(
                 (o.audio_path for o in seg.options if o.voice_id == selected_voice_id),
                 None,
@@ -243,9 +259,21 @@ def confirm_voices(
     store.update_job(job_id, voice_options_per_segment=updated_segs)
     cp.release_and_resume(job_id)
 
+    # Nếu voice không đổi và đã có media options → nhảy thẳng đến media selection
+    if not voices_changed and job.media_options:
+        store.update_job(
+            job_id,
+            status=JobStatus.AWAITING_CONFIRMATION,
+            checkpoint_type=CheckpointType.MEDIA_SELECTION,
+        )
+        return CreateJobResponse(
+            job_id=job_id,
+            status=JobStatus.AWAITING_CONFIRMATION.value,
+            message="Giọng đọc không thay đổi, giữ nguyên media",
+        )
+
     from app.tasks.qa_task import select_media_task
     select_media_task.delay(job_id)
-
     return CreateJobResponse(
         job_id=job_id,
         status=JobStatus.PROCESSING.value,
@@ -397,6 +425,59 @@ def preview_minio_media(
     content_type = content_type_map.get(suffix, "application/octet-stream")
 
     return StreamingResponse(iter([data]), media_type=content_type)
+
+
+# ---------------------------------------------------------------------------
+# Go back to previous checkpoint
+# ---------------------------------------------------------------------------
+
+CHECKPOINT_ORDER = [
+    CheckpointType.TEXT_REVIEW,
+    CheckpointType.VOICE_SELECTION,
+    CheckpointType.MEDIA_SELECTION,
+]
+
+
+@router.post("/jobs/{job_id}/back", response_model=CreateJobResponse)
+def go_back(
+    job_id: str,
+    store: JobStore = Depends(_store),
+) -> CreateJobResponse:
+    job = _get_or_404(store, job_id)
+
+    # COMPLETED → back to media selection
+    if job.status == JobStatus.COMPLETED:
+        store.update_job(
+            job_id,
+            status=JobStatus.AWAITING_CONFIRMATION,
+            checkpoint_type=CheckpointType.MEDIA_SELECTION,
+            confirmation_lock=False,
+        )
+        return CreateJobResponse(
+            job_id=job_id,
+            status=JobStatus.AWAITING_CONFIRMATION.value,
+            message="Đã quay lại chọn media",
+        )
+
+    if job.status != JobStatus.AWAITING_CONFIRMATION or job.checkpoint_type is None:
+        raise HTTPException(status_code=409, detail="Job không ở trạng thái chờ xác nhận")
+
+    current_idx = CHECKPOINT_ORDER.index(job.checkpoint_type)
+    if current_idx == 0:
+        raise HTTPException(status_code=400, detail="Đã ở bước đầu tiên")
+
+    prev_checkpoint = CHECKPOINT_ORDER[current_idx - 1]
+    store.update_job(
+        job_id,
+        checkpoint_type=prev_checkpoint,
+        confirmation_lock=False,
+    )
+
+    return CreateJobResponse(
+        job_id=job_id,
+        status=JobStatus.AWAITING_CONFIRMATION.value,
+        message="Đã quay lại bước trước",
+    )
 
 
 # ---------------------------------------------------------------------------
