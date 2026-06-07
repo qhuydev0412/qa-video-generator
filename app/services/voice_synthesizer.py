@@ -30,13 +30,14 @@ class VoiceSynthesizer:
             self._client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         return self._client
 
-    def synthesize(self, text: str, voice_id: str, output_path: Path) -> float:
+    def synthesize(self, text: str, voice_id: str, output_path: Path, speed: float = 1.2) -> float:
         """Generate TTS audio. Returns duration in seconds."""
         response = self.client.audio.speech.create(
             model=self._model,
             voice=voice_id,  # type: ignore[arg-type]
             input=text,
             response_format="mp3",
+            speed=speed,
         )
         response.stream_to_file(str(output_path))
         return self._get_duration(output_path)

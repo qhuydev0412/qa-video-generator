@@ -664,7 +664,13 @@ function renderMediaSelection(job) {
   );
   activeSlotIdx = 0;
 
-  renderMediaGrid('bg-grid', opts.background_options || [], 'bg', 'background');
+  const bgOptions = opts.background_options || [];
+  renderMediaGrid('bg-grid', bgOptions, 'bg', 'background');
+  // Auto-select first background
+  if (bgOptions.length > 0) {
+    selectedMedia.bg = { bucket: bgOptions[0].bucket, key: bgOptions[0].key };
+    document.getElementById(`media-bg-0`)?.classList.add('selected');
+  }
   renderTransitionSection();
   showView('media');
 }

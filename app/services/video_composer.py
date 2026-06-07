@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
 W = 1080
 H = 1920
 FPS = 24
-IMG_MAX_H = 700   # max height for Q/A image overlay (top area)
-IMG_TOP_PAD = 60  # pixels from top edge
+IMG_MAX_W = 920   # max width for Q/A image overlay
+IMG_MAX_H = 560   # max height for Q/A image overlay
+IMG_TOP_PAD = 80  # pixels from top edge
 
 
 @dataclass
@@ -99,7 +100,7 @@ class VideoComposer:
 
         # Image: scale to fit within full width, capped at IMG_MAX_H, positioned near top
         img_filter = (
-            f"scale={W}:{IMG_MAX_H}:force_original_aspect_ratio=decrease,setsar=1"
+            f"scale={IMG_MAX_W}:{IMG_MAX_H}:force_original_aspect_ratio=decrease,setsar=1"
         )
         img_overlay = f"overlay=(main_w-overlay_w)/2:{IMG_TOP_PAD}"
 
