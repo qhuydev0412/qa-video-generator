@@ -70,6 +70,7 @@ class MinioMedia(BaseModel):
 class MediaOptions(BaseModel):
     background_options: list[MinioMedia] = Field(default_factory=list)
     transition_pool: list[MinioMedia] = Field(default_factory=list)  # combined gif+sound pool
+    n_transitions: int = 0
 
 
 class MediaSelection(BaseModel):

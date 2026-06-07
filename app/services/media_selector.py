@@ -36,6 +36,7 @@ class MediaSelector:
         return MediaOptions(
             background_options=self._to_media_list(bg_keys, backgrounds_bucket, "background"),
             transition_pool=pool,
+            n_transitions=n_transitions,
         )
 
     def _to_media_list(self, keys: list[str], bucket: str, media_type: str) -> list[MinioMedia]:

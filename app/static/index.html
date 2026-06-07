@@ -657,9 +657,7 @@ function renderMediaSelection(job) {
   const opts = job.media_options || {};
 
   transitionPool = opts.transition_pool || [];
-  nTransitions = (job.voice_options_per_segment || []).length > 0
-    ? Math.max((job.voice_options_per_segment || []).length - 1, 0)
-    : 0;
+  nTransitions = opts.n_transitions || 0;
   // Auto-assign: cycle through pool for each slot
   transitionAssignments = Array.from({ length: nTransitions }, (_, i) =>
     transitionPool.length > 0 ? i % transitionPool.length : -1
