@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 W = 1080
 H = 1920
 FPS = 24
-IMG_MAX_W = 920   # max width for Q/A image overlay
-IMG_MAX_H = 560   # max height for Q/A image overlay
-IMG_TOP_PAD = 80  # pixels from top edge
+IMG_MAX_W = 1020  # max width for Q/A image overlay
+IMG_MAX_H = 680   # max height for Q/A image overlay
+IMG_TOP_PAD = 160 # pixels from top edge
 
 
 @dataclass
@@ -160,7 +160,9 @@ class VideoComposer:
             filter_parts.append(f"color=black:size={W}x{H}:rate={FPS}[vbg]")
 
         # Visual: gif overlay (centered)
+        gif_input_idx: int | None = None
         if transition.gif_path:
+            gif_input_idx = next_idx
             inputs += ["-stream_loop", "-1", "-i", str(transition.gif_path)]
             filter_parts.append(
                 f"[{next_idx}:v]scale={W}:{H}:force_original_aspect_ratio=decrease,"
@@ -171,11 +173,16 @@ class VideoComposer:
         else:
             filter_parts.append("[vbg]null[v]")
 
-        # Audio: sound effect (resampled) or generated silence
+        # Audio: sound file > gif's own audio > silence
         if transition.sound_path:
             inputs += ["-i", str(transition.sound_path)]
             filter_parts.append(
                 f"[{next_idx}:a]aresample=44100,"
+                f"aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
+            )
+        elif gif_input_idx is not None and self._has_audio(transition.gif_path):
+            filter_parts.append(
+                f"[{gif_input_idx}:a]aresample=44100,"
                 f"aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
             )
         else:

@@ -42,6 +42,12 @@ class MinioClient:
             return []
         return random.sample(keys, min(n, len(keys)))
 
+    def search_keys(self, bucket: str, query: str, n: int = 10) -> list[str]:
+        keys = self.list_keys(bucket)
+        q = query.lower()
+        matched = [k for k in keys if q in Path(k).name.lower()]
+        return matched[:n]
+
     def presigned_url(self, bucket: str, key: str, expires_seconds: int = 3600) -> str:
         try:
             return self._client.presigned_get_object(

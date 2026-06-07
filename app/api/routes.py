@@ -420,16 +420,22 @@ def get_audio_preview(
 @router.get("/transition-options")
 def get_transition_options(
     n: int = 4,
+    search: str = "",
     minio: MinioClient = Depends(_minio),
 ) -> list[dict]:
     import random as _rnd
-    gif_keys = minio.random_pick(settings.MINIO_BUCKET_GIFS, n)
-    sound_keys = minio.random_pick(settings.MINIO_BUCKET_SOUNDS, n)
+    if search.strip():
+        gif_keys = minio.search_keys(settings.MINIO_BUCKET_GIFS, search.strip(), n * 2)
+        sound_keys = minio.search_keys(settings.MINIO_BUCKET_SOUNDS, search.strip(), n * 2)
+    else:
+        gif_keys = minio.random_pick(settings.MINIO_BUCKET_GIFS, n)
+        sound_keys = minio.random_pick(settings.MINIO_BUCKET_SOUNDS, n)
     combined = (
         [{"bucket": settings.MINIO_BUCKET_GIFS, "key": k, "media_type": "gif"} for k in gif_keys]
         + [{"bucket": settings.MINIO_BUCKET_SOUNDS, "key": k, "media_type": "sound"} for k in sound_keys]
     )
-    _rnd.shuffle(combined)
+    if not search.strip():
+        _rnd.shuffle(combined)
     return combined
 
 

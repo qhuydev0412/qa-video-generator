@@ -94,6 +94,8 @@ select.voice-select:focus { outline: none; border-color: #6366f1; }
 .trans-slot .media-option video { height: 80px; cursor: pointer; }
 .trans-slot .media-option audio { width: 100%; }
 .trans-slot-loading { display: flex; align-items: center; gap: 8px; padding: 16px 0; color: #666; font-size: 13px; }
+.slot-search { background: #1a1a1a; border: 1px solid #333; color: #e5e5e5; padding: 5px 10px; border-radius: 6px; font-size: 13px; width: 140px; }
+.slot-search:focus { outline: none; border-color: #6366f1; }
 
 /* Progress */
 .progress-bar { background: #2a2a2a; border-radius: 8px; height: 8px; overflow: hidden; margin: 12px 0; }
@@ -721,7 +723,11 @@ function renderTransitionSection() {
     <div class="trans-slot">
       <div class="trans-slot-header">
         <span>🎬 Chuyển cảnh ${i + 1}</span>
-        <button class="btn btn-sm btn-secondary" onclick="reloadSlot(${i})">🔄 Tải mới</button>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="search-slot-${i}" class="slot-search" placeholder="Tìm meme..." onkeydown="if(event.key==='Enter')searchSlot(${i})">
+          <button class="btn btn-sm btn-secondary btn-icon" onclick="searchSlot(${i})" title="Tìm">🔍</button>
+          <button class="btn btn-sm btn-secondary btn-icon" onclick="reloadSlot(${i})" title="Tải ngẫu nhiên">🔄</button>
+        </div>
       </div>
       <div id="trans-slot-grid-${i}">
         <div class="trans-slot-loading"><div class="spinner" style="width:20px;height:20px;border-width:2px"></div> Đang tải...</div>
@@ -760,7 +766,7 @@ function renderSlotGrid(slotIdx) {
     const ext = filename.split('.').pop().toLowerCase();
     let preview = '';
     if (['mp4', 'webm', 'mov', 'gif'].includes(ext)) {
-      preview = `<video src="${proxyUrl}" controls autoplay loop muted style="width:100%;height:80px;object-fit:cover"></video>`;
+      preview = `<video src="${proxyUrl}" controls style="width:100%;height:80px;object-fit:cover"></video>`;
     } else if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) {
       preview = `<div style="padding:6px"><audio controls src="${proxyUrl}" style="width:100%"></audio></div>`;
     } else {
@@ -776,7 +782,26 @@ function selectSlotOption(slotIdx, optionIdx) {
   renderSlotGrid(slotIdx);
 }
 
+async function searchSlot(slotIdx) {
+  const query = document.getElementById(`search-slot-${slotIdx}`)?.value.trim() || '';
+  const el = document.getElementById(`trans-slot-grid-${slotIdx}`);
+  if (el) el.innerHTML = '<div class="trans-slot-loading"><div class="spinner" style="width:20px;height:20px;border-width:2px"></div> Đang tìm...</div>';
+  try {
+    const url = `/api/v1/transition-options?n=8${query ? '&search=' + encodeURIComponent(query) : ''}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Lỗi tải');
+    const items = await res.json();
+    slotOptions[slotIdx] = items;
+    slotSelections[slotIdx] = 0;
+    renderSlotGrid(slotIdx);
+  } catch (err) {
+    if (el) el.innerHTML = `<p class="no-media-msg">❌ ${err.message}</p>`;
+  }
+}
+
 async function reloadSlot(slotIdx) {
+  const searchEl = document.getElementById(`search-slot-${slotIdx}`);
+  if (searchEl) searchEl.value = '';
   const el = document.getElementById(`trans-slot-grid-${slotIdx}`);
   if (el) el.innerHTML = '<div class="trans-slot-loading"><div class="spinner" style="width:20px;height:20px;border-width:2px"></div> Đang tải...</div>';
   await loadSlotOptions(slotIdx);
