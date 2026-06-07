@@ -519,7 +519,7 @@ function renderTextReview(job) {
 }
 
 async function confirmText() {
-  const textEls = document.querySelectorAll('[id^="text-"]');
+  const textEls = document.querySelectorAll('textarea[id^="text-"]');
   const texts = [...textEls].map(el => ({
     image_index: parseInt(el.id.replace('text-', '')),
     text: el.value,
