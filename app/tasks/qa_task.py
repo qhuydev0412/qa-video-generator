@@ -83,6 +83,10 @@ def extract_texts_task(self, job_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+_DEFAULT_VOICE_ID = "alloy"
+_DEFAULT_VOICE_NAME = "Alloy (Trung tính)"
+
+
 @shared_task(bind=True, name="qa.generate_voices")
 def generate_voices_task(self, job_id: str) -> None:
     store = _get_store()
@@ -103,50 +107,44 @@ def generate_voices_task(self, job_id: str) -> None:
         voices_dir.mkdir(parents=True, exist_ok=True)
 
         texts = {t.image_index: t.text for t in job.extracted_texts}
-        voice_options_per_segment: list[SegmentVoiceOptions] = []
 
-        # Generate all voices for all segments in parallel
+        # Generate default voice for all segments in parallel
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {}
+            futures: dict = {}
             for img in job.images:
                 text = texts.get(img.index, "")
                 if not text.strip():
                     continue
-                future = executor.submit(
-                    synthesizer.synthesize_all_voices,
-                    text,
-                    voices_dir,
-                    f"img{img.index}",
-                )
-                futures[future] = img.index
+                out = voices_dir / f"img{img.index}_{_DEFAULT_VOICE_ID}.mp3"
+                future = executor.submit(synthesizer.synthesize, text, _DEFAULT_VOICE_ID, out)
+                futures[future] = (img.index, text, out)
 
-            segment_results: dict[int, list[dict]] = {}
+            segment_results: dict[int, tuple[str, Path]] = {}
             for future in concurrent.futures.as_completed(futures):
-                idx = futures[future]
+                idx, text, path = futures[future]
                 try:
-                    segment_results[idx] = future.result()
+                    future.result()
+                    segment_results[idx] = (text, path)
                 except Exception as exc:
                     logger.error("Voice gen failed for image %d: %s", idx, exc)
-                    segment_results[idx] = []
 
-        for img in job.images:
-            text = texts.get(img.index, "")
-            if not text.strip():
+        voice_options_per_segment: list[SegmentVoiceOptions] = []
+        for img in sorted(job.images, key=lambda x: x.index):
+            if img.index not in segment_results:
                 continue
-            raw_options = segment_results.get(img.index, [])
-            options = [
-                VoicePreview(
-                    voice_id=r["voice_id"],
-                    voice_name=r["voice_name"],
-                    audio_path=r["audio_path"],
-                )
-                for r in raw_options
-            ]
+            text, audio_path = segment_results[img.index]
+            preview = VoicePreview(
+                voice_id=_DEFAULT_VOICE_ID,
+                voice_name=_DEFAULT_VOICE_NAME,
+                audio_path=str(audio_path),
+            )
             voice_options_per_segment.append(
                 SegmentVoiceOptions(
                     image_index=img.index,
                     text=text,
-                    options=options,
+                    options=[preview],
+                    selected_voice_id=_DEFAULT_VOICE_ID,
+                    selected_audio_path=str(audio_path),
                 )
             )
 

@@ -44,13 +44,8 @@ class TextConfirmRequest(BaseModel):
     texts: list[TextEdit]
 
 
-class VoiceSelection(BaseModel):
-    image_index: int
+class VoicePreviewRequest(BaseModel):
     voice_id: str
-
-
-class VoiceConfirmRequest(BaseModel):
-    voices: list[VoiceSelection]
 
 
 class MediaConfirmRequest(BaseModel):

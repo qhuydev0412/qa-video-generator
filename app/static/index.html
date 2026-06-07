@@ -67,12 +67,14 @@ header span { font-size: 24px; }
 .voice-card { background: #222; border: 1px solid #2a2a2a; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
 .voice-card .top { display: flex; gap: 16px; align-items: flex-start; }
 .voice-card img { width: 80px; height: 70px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
-.voice-card .info { flex: 1; }
+.voice-card .info { flex: 1; min-width: 0; }
 .voice-card .seg-text { font-size: 14px; color: #ccc; margin-bottom: 10px; line-height: 1.5; }
-.voice-controls { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.voice-preview-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.voice-name-tag { font-size: 12px; color: #a78bfa; background: rgba(99,102,241,0.15); padding: 3px 10px; border-radius: 4px; white-space: nowrap; }
+.voice-card audio { height: 36px; flex: 1; min-width: 160px; }
+.voice-change-panel { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px; }
 select.voice-select { background: #1a1a1a; border: 1px solid #333; color: #e5e5e5; padding: 7px 12px; border-radius: 6px; font-size: 14px; }
 select.voice-select:focus { outline: none; border-color: #6366f1; }
-.playing { color: #4ade80; }
 
 /* Media selection */
 .media-section { margin-bottom: 24px; }
@@ -263,7 +265,6 @@ let pollTimer = null;
 let questionFile = null;
 let answerFiles = [];
 let selectedMedia = { bg: null, gif: null, sound: null };
-let currentAudio = null;
 
 const VOICES = [
   { id: 'alloy',   name: 'Alloy (Trung tính)' },
@@ -485,7 +486,7 @@ function handleJobState(job) {
 function stepMsg(step) {
   const msgs = {
     extracting_text: 'Đang nhận diện chữ trong ảnh...',
-    generating_voices: 'Đang tạo giọng đọc (6 giọng × mỗi ảnh)...',
+    generating_voices: 'Đang tạo giọng đọc...',
     selecting_media: 'Đang tìm media từ thư viện...',
     composing_video: 'Đang ghép video...',
   };
@@ -545,28 +546,22 @@ async function confirmText() {
 // ============================================================
 // Step 3: Voice Selection
 // ============================================================
-let voiceSelections = {}; // {image_index: voice_id}
-
 function renderVoiceSelection(job) {
   setStepActive(3);
   const segments = job.voice_options_per_segment || [];
-  voiceSelections = {};
 
-  // Default: pick first available voice for each
-  segments.forEach(seg => {
-    if (seg.options && seg.options.length > 0) {
-      voiceSelections[seg.image_index] = seg.options[0].voice_id;
-    }
-  });
+  const voiceOpts = VOICES.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
 
   const container = document.getElementById('voice-cards');
   container.innerHTML = segments.map(seg => {
     const label = seg.image_index === 0 ? 'Câu hỏi' : `Câu trả lời ${seg.image_index}`;
     const badge = seg.image_index === 0 ? 'badge-question' : 'badge-answer';
-    const voiceOpts = VOICES.map(v =>
-      `<option value="${v.id}" ${voiceSelections[seg.image_index] === v.id ? 'selected' : ''}>${v.name}</option>`
-    ).join('');
-    const firstAudio = seg.options && seg.options.length > 0 ? seg.options[0].audio_path : null;
+    const curOption = seg.options && seg.options.length > 0 ? seg.options[0] : null;
+    const curName = curOption ? curOption.voice_name : 'Alloy (Trung tính)';
+    const audioFilename = curOption ? curOption.audio_path.split(/[\\/]/).pop() : null;
+    const audioEl = audioFilename
+      ? `<audio id="vaudio-${seg.image_index}" controls src="/api/v1/jobs/${jobId}/audio/${audioFilename}" style="height:36px;flex:1;min-width:160px"></audio>`
+      : '';
 
     return `<div class="voice-card">
       <div class="top">
@@ -575,16 +570,15 @@ function renderVoiceSelection(job) {
         <div class="info">
           <div style="margin-bottom:8px"><span class="badge ${badge}">${label}</span></div>
           <div class="seg-text">${seg.text}</div>
-          <div class="voice-controls">
-            <select class="voice-select" id="voice-sel-${seg.image_index}"
-              onchange="voiceSelections[${seg.image_index}]=this.value">
-              ${voiceOpts}
-            </select>
-            <button class="btn btn-sm btn-secondary"
-              onclick="playVoicePreview(${seg.image_index}, ${JSON.stringify(seg.options || []).replace(/"/g,'&quot;')})">
-              ▶ Nghe thử
-            </button>
-            <span id="play-status-${seg.image_index}" style="font-size:12px;color:#666"></span>
+          <div class="voice-preview-row">
+            <span class="voice-name-tag" id="vname-${seg.image_index}">${curName}</span>
+            ${audioEl}
+            <button class="btn btn-sm btn-secondary" onclick="toggleChangeVoice(${seg.image_index})">🔄 Đổi giọng</button>
+          </div>
+          <div class="voice-change-panel" id="vchange-${seg.image_index}" style="display:none">
+            <select class="voice-select" id="voice-sel-${seg.image_index}">${voiceOpts}</select>
+            <button class="btn btn-sm btn-secondary" id="vprev-btn-${seg.image_index}" onclick="previewVoice(${seg.image_index})">▶ Thử</button>
+            <span id="vprev-status-${seg.image_index}" style="font-size:12px;color:#888"></span>
           </div>
         </div>
       </div>
@@ -594,50 +588,57 @@ function renderVoiceSelection(job) {
   showView('voice');
 }
 
-function playVoicePreview(imageIndex, options) {
-  const selectedVoiceId = document.getElementById(`voice-sel-${imageIndex}`).value;
-  const statusEl = document.getElementById(`play-status-${imageIndex}`);
+function toggleChangeVoice(imageIndex) {
+  const panel = document.getElementById(`vchange-${imageIndex}`);
+  panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+}
 
-  // Find matching pre-generated audio
-  const opt = options.find(o => o.voice_id === selectedVoiceId);
-  if (!opt) { statusEl.textContent = 'Không có audio'; return; }
+async function previewVoice(imageIndex) {
+  const voiceId = document.getElementById(`voice-sel-${imageIndex}`).value;
+  const statusEl = document.getElementById(`vprev-status-${imageIndex}`);
+  const btn = document.getElementById(`vprev-btn-${imageIndex}`);
 
-  // audio_path is a full path on server, extract filename
-  const filename = opt.audio_path.split(/[\\/]/).pop();
-  const audioUrl = `/api/v1/jobs/${jobId}/audio/${filename}`;
+  btn.disabled = true;
+  statusEl.textContent = '⏳ Đang tạo...';
 
-  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-  document.querySelectorAll('[id^="play-status-"]').forEach(el => el.textContent = '');
+  try {
+    const res = await fetch(`/api/v1/jobs/${jobId}/segments/${imageIndex}/preview-voice`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice_id: voiceId }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Lỗi');
+    const data = await res.json();
 
-  statusEl.textContent = '⏳ Loading...';
-  const audio = new Audio(audioUrl);
-  currentAudio = audio;
-  audio.play().then(() => {
-    statusEl.textContent = '▶ Đang phát';
-    audio.onended = () => { statusEl.textContent = ''; currentAudio = null; };
-  }).catch(() => {
-    statusEl.textContent = '❌ Lỗi';
-  });
+    const audioEl = document.getElementById(`vaudio-${imageIndex}`);
+    const nameEl = document.getElementById(`vname-${imageIndex}`);
+    if (audioEl) {
+      audioEl.src = `/api/v1/jobs/${jobId}/audio/${data.audio_filename}`;
+      audioEl.load();
+      audioEl.play().catch(() => {});
+    }
+    if (nameEl) nameEl.textContent = data.voice_name;
+
+    statusEl.textContent = '✅';
+    setTimeout(() => {
+      const panel = document.getElementById(`vchange-${imageIndex}`);
+      if (panel) panel.style.display = 'none';
+      statusEl.textContent = '';
+    }, 1200);
+  } catch (err) {
+    statusEl.textContent = '❌ ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function confirmVoices() {
-  const voices = Object.entries(voiceSelections).map(([idx, vid]) => ({
-    image_index: parseInt(idx),
-    voice_id: vid,
-  }));
-
-  if (!voices.length) { showToast('Chưa chọn giọng nào'); return; }
-
   setStepActive(3);
   showView('processing');
   updateProgress(50, 'Đang tìm media...');
 
   try {
-    const res = await fetch(`/api/v1/jobs/${jobId}/confirm/voices`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voices }),
-    });
+    const res = await fetch(`/api/v1/jobs/${jobId}/confirm/voices`, { method: 'POST' });
     if (!res.ok) throw new Error((await res.json()).detail || 'Lỗi xác nhận');
     startPolling();
   } catch (err) {
@@ -792,9 +793,7 @@ function resetAll() {
   questionFile = null;
   answerFiles = [];
   selectedMedia = { bg: null, gif: null, sound: null };
-  voiceSelections = {};
   stopPolling();
-  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   document.getElementById('preview-question').innerHTML = '';
   document.getElementById('answer-list').innerHTML = '';
   document.getElementById('input-question').value = '';
