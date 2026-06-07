@@ -8,25 +8,30 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    REDIS_URL: str = "redis://localhost:6379/0"
-    CELERY_BROKER_URL: str = "redis://localhost:6379/1"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
+    # Redis — default dùng service name "redis" trong docker-compose
+    REDIS_URL: str = "redis://redis:6379/0"
+    CELERY_BROKER_URL: str = "redis://redis:6379/1"
+    CELERY_RESULT_BACKEND: str = "redis://redis:6379/1"
 
     STORAGE_PATH: str = "storage/jobs"
 
+    # OpenAI — bắt buộc set qua env
     OPENAI_API_KEY: str = ""
     TTS_MODEL: str = "tts-1"
     OCR_MODEL: str = "gpt-4o"
 
-    MINIO_ENDPOINT: str = "minio-i-new.zeabur.app"
-    MINIO_ACCESS_KEY: str = "minio"
+    # MinIO — endpoint/key/secret bắt buộc set qua env
+    MINIO_ENDPOINT: str = ""
+    MINIO_ACCESS_KEY: str = ""
     MINIO_SECRET_KEY: str = ""
     MINIO_SECURE: bool = True
 
+    # Bucket names — cố định
     MINIO_BUCKET_BACKGROUNDS: str = "backgrounds"
     MINIO_BUCKET_GIFS: str = "meme-gifs"
     MINIO_BUCKET_SOUNDS: str = "meme-audios"
 
+    # Video
     VIDEO_WIDTH: int = 1080
     VIDEO_HEIGHT: int = 1920
     TRANSITION_DURATION: float = 2.0
