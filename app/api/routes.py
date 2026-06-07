@@ -413,6 +413,27 @@ def get_audio_preview(
 
 
 # ---------------------------------------------------------------------------
+# Random transition options (per-slot, called independently by frontend)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/transition-options")
+def get_transition_options(
+    n: int = 4,
+    minio: MinioClient = Depends(_minio),
+) -> list[dict]:
+    import random as _rnd
+    gif_keys = minio.random_pick(settings.MINIO_BUCKET_GIFS, n)
+    sound_keys = minio.random_pick(settings.MINIO_BUCKET_SOUNDS, n)
+    combined = (
+        [{"bucket": settings.MINIO_BUCKET_GIFS, "key": k, "media_type": "gif"} for k in gif_keys]
+        + [{"bucket": settings.MINIO_BUCKET_SOUNDS, "key": k, "media_type": "sound"} for k in sound_keys]
+    )
+    _rnd.shuffle(combined)
+    return combined
+
+
+# ---------------------------------------------------------------------------
 # MinIO media proxy (to avoid CORS issues)
 # ---------------------------------------------------------------------------
 

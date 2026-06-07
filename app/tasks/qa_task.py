@@ -189,8 +189,6 @@ def select_media_task(self, job_id: str) -> None:
         n_transitions = max(len(job.voice_options_per_segment) - 1, 0)
         options = selector.pick_options(
             backgrounds_bucket=settings.MINIO_BUCKET_BACKGROUNDS,
-            gifs_bucket=settings.MINIO_BUCKET_GIFS,
-            sounds_bucket=settings.MINIO_BUCKET_SOUNDS,
             n_transitions=n_transitions,
         )
 

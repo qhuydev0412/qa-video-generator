@@ -88,9 +88,12 @@ select.voice-select:focus { outline: none; border-color: #6366f1; }
 .media-option .media-label { font-size: 11px; padding: 6px 8px; color: #aaa; word-break: break-all; }
 .media-none { display: flex; align-items: center; justify-content: center; height: 100px; color: #444; font-size: 13px; }
 .no-media-msg { color: #666; font-size: 13px; padding: 8px 0; }
-.pool-badge { position: absolute; top: 4px; right: 4px; background: #6366f1; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; z-index: 1; pointer-events: none; }
-.slot-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
-.transition-hint { font-size: 12px; color: #888; margin-bottom: 8px; }
+.trans-slot { background: #1a1a2a; border: 1px solid #2a2a3a; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+.trans-slot-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 14px; font-weight: 500; color: #ccc; }
+.trans-slot .media-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+.trans-slot .media-option video { height: 80px; cursor: pointer; }
+.trans-slot .media-option audio { width: 100%; }
+.trans-slot-loading { display: flex; align-items: center; gap: 8px; padding: 16px 0; color: #666; font-size: 13px; }
 
 /* Progress */
 .progress-bar { background: #2a2a2a; border-radius: 8px; height: 8px; overflow: hidden; margin: 12px 0; }
@@ -263,9 +266,8 @@ let pollTimer = null;
 let questionFile = null;
 let answerFiles = [];
 let selectedMedia = { bg: null };
-let transitionPool = [];
-let transitionAssignments = [];
-let activeSlotIdx = 0;
+let slotOptions = [];    // slotOptions[i] = [{bucket,key,media_type}, ...]
+let slotSelections = []; // slotSelections[i] = selected index in slotOptions[i]
 let nTransitions = 0;
 
 const VOICES = [
@@ -656,13 +658,9 @@ function renderMediaSelection(job) {
   selectedMedia = { bg: null };
   const opts = job.media_options || {};
 
-  transitionPool = opts.transition_pool || [];
   nTransitions = opts.n_transitions || 0;
-  // Auto-assign: cycle through pool for each slot
-  transitionAssignments = Array.from({ length: nTransitions }, (_, i) =>
-    transitionPool.length > 0 ? i % transitionPool.length : -1
-  );
-  activeSlotIdx = 0;
+  slotOptions = Array(nTransitions).fill(null);
+  slotSelections = Array(nTransitions).fill(0);
 
   const bgOptions = opts.background_options || [];
   renderMediaGrid('bg-grid', bgOptions, 'bg', 'background');
@@ -719,56 +717,69 @@ function renderTransitionSection() {
     container.innerHTML = '<p class="no-media-msg">Video chỉ có 1 ảnh, không cần chuyển cảnh</p>';
     return;
   }
-  if (!transitionPool.length) {
-    container.innerHTML = '<p class="no-media-msg">Không có gif/sound trong thư viện</p>';
-    return;
+  container.innerHTML = Array.from({ length: nTransitions }, (_, i) => `
+    <div class="trans-slot">
+      <div class="trans-slot-header">
+        <span>🎬 Chuyển cảnh ${i + 1}</span>
+        <button class="btn btn-sm btn-secondary" onclick="reloadSlot(${i})">🔄 Tải mới</button>
+      </div>
+      <div id="trans-slot-grid-${i}">
+        <div class="trans-slot-loading"><div class="spinner" style="width:20px;height:20px;border-width:2px"></div> Đang tải...</div>
+      </div>
+    </div>`).join('');
+
+  for (let i = 0; i < nTransitions; i++) loadSlotOptions(i);
+}
+
+async function loadSlotOptions(slotIdx) {
+  try {
+    const res = await fetch('/api/v1/transition-options?n=4');
+    if (!res.ok) throw new Error('Lỗi tải');
+    const items = await res.json();
+    slotOptions[slotIdx] = items;
+    if (!(slotSelections[slotIdx] >= 0 && slotSelections[slotIdx] < items.length)) {
+      slotSelections[slotIdx] = 0;
+    }
+    renderSlotGrid(slotIdx);
+  } catch (err) {
+    const el = document.getElementById(`trans-slot-grid-${slotIdx}`);
+    if (el) el.innerHTML = `<p class="no-media-msg">❌ ${err.message}</p>`;
   }
+}
 
-  const slotBtns = Array.from({ length: nTransitions }, (_, i) => {
-    const assignedName = transitionAssignments[i] >= 0
-      ? transitionPool[transitionAssignments[i]].key.split('/').pop().slice(0, 14)
-      : '—';
-    return `<button class="btn btn-sm ${i === activeSlotIdx ? 'btn-primary' : 'btn-secondary'}"
-      onclick="setActiveSlot(${i})">Cảnh ${i + 1}: ${assignedName}</button>`;
-  }).join('');
+function renderSlotGrid(slotIdx) {
+  const el = document.getElementById(`trans-slot-grid-${slotIdx}`);
+  if (!el) return;
+  const items = slotOptions[slotIdx] || [];
+  const sel = slotSelections[slotIdx] ?? 0;
+  if (!items.length) { el.innerHTML = '<p class="no-media-msg">Không có media</p>'; return; }
 
-  const poolHtml = transitionPool.map((item, i) => {
-    const isActive = transitionAssignments[activeSlotIdx] === i;
-    const assignedTo = transitionAssignments.indexOf(i);
+  el.innerHTML = `<div class="media-grid">${items.map((item, i) => {
     const proxyUrl = `/api/v1/media/preview/${item.bucket}/${item.key}`;
     const filename = item.key.split('/').pop();
     const ext = filename.split('.').pop().toLowerCase();
     let preview = '';
     if (['mp4', 'webm', 'mov', 'gif'].includes(ext)) {
-      preview = `<video src="${proxyUrl}" muted loop autoplay style="width:100%;height:80px;object-fit:cover"></video>`;
-    } else if (['mp3', 'wav', 'ogg'].includes(ext)) {
-      preview = `<div style="padding:8px"><audio controls src="${proxyUrl}" style="width:100%"></audio></div>`;
+      preview = `<video src="${proxyUrl}" controls autoplay loop muted style="width:100%;height:80px;object-fit:cover"></video>`;
+    } else if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) {
+      preview = `<div style="padding:6px"><audio controls src="${proxyUrl}" style="width:100%"></audio></div>`;
     } else {
       preview = `<div class="media-none">📄</div>`;
     }
-    const badge = assignedTo >= 0
-      ? `<div class="pool-badge">Cảnh ${assignedTo + 1}</div>` : '';
-    return `<div class="media-option ${isActive ? 'selected' : ''}" style="position:relative" onclick="assignToSlot(${i})">
-      ${badge}${preview}
-      <div class="media-label">${filename}</div>
-    </div>`;
-  }).join('');
-
-  container.innerHTML = `
-    <p class="transition-hint">Chọn ô chuyển cảnh, sau đó nhấn asset để gán:</p>
-    <div class="slot-row">${slotBtns}</div>
-    <div class="media-grid">${poolHtml}</div>`;
+    return `<div class="media-option ${i === sel ? 'selected' : ''}" onclick="selectSlotOption(${slotIdx},${i})">
+      ${preview}<div class="media-label">${filename}</div></div>`;
+  }).join('')}</div>`;
 }
 
-function setActiveSlot(idx) {
-  activeSlotIdx = idx;
-  renderTransitionSection();
+function selectSlotOption(slotIdx, optionIdx) {
+  slotSelections[slotIdx] = optionIdx;
+  renderSlotGrid(slotIdx);
 }
 
-function assignToSlot(poolIdx) {
-  transitionAssignments[activeSlotIdx] = poolIdx;
-  if (activeSlotIdx < nTransitions - 1) activeSlotIdx++;
-  renderTransitionSection();
+async function reloadSlot(slotIdx) {
+  const el = document.getElementById(`trans-slot-grid-${slotIdx}`);
+  if (el) el.innerHTML = '<div class="trans-slot-loading"><div class="spinner" style="width:20px;height:20px;border-width:2px"></div> Đang tải...</div>';
+  await loadSlotOptions(slotIdx);
 }
 
 async function regenerateMedia() {
@@ -789,13 +800,12 @@ async function confirmMedia() {
     body.background_bucket = selectedMedia.bg.bucket;
     body.background_key = selectedMedia.bg.key;
   }
-  // Build transitions list from assignments
-  body.transitions = transitionAssignments
-    .filter(idx => idx >= 0 && idx < transitionPool.length)
-    .map(idx => {
-      const item = transitionPool[idx];
-      return { bucket: item.bucket, key: item.key, media_type: item.media_type };
-    });
+  // Build transitions from per-slot selections
+  body.transitions = slotSelections.map((sel, i) => {
+    const item = slotOptions[i]?.[sel];
+    if (!item) return null;
+    return { bucket: item.bucket, key: item.key, media_type: item.media_type };
+  }).filter(Boolean);
 
   setStepActive(4);
   showView('processing');
@@ -858,8 +868,8 @@ function resetAll() {
   questionFile = null;
   answerFiles = [];
   selectedMedia = { bg: null };
-  transitionPool = [];
-  transitionAssignments = [];
+  slotOptions = [];
+  slotSelections = [];
   nTransitions = 0;
   stopPolling();
   document.getElementById('preview-question').innerHTML = '';

@@ -82,12 +82,7 @@ class VideoComposer:
         concat_path = work_dir / "concat.mp4"
         self._concat(clip_paths, concat_path)
 
-        if background_video_path and self._has_audio(background_video_path):
-            bg_audio = work_dir / "bg_audio.aac"
-            self._extract_audio(background_video_path, bg_audio)
-            self._mix_bg_audio(concat_path, bg_audio, output_path)
-        else:
-            concat_path.rename(output_path)
+        concat_path.rename(output_path)
 
         return output_path
 
@@ -106,10 +101,10 @@ class VideoComposer:
 
         if bg:
             filter_complex = (
-                f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,"
-                f"crop={W}:{H},setsar=1,fps={FPS}[bg];"
+                f"[0:v]scale=-2:{H},crop={W}:{H},setsar=1,fps={FPS}[bg];"
                 f"[1:v]{img_filter}[img];"
-                f"[bg][img]{img_overlay}[v]"
+                f"[bg][img]{img_overlay}[v];"
+                f"[2:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
             )
             cmd = [
                 "ffmpeg", "-y",
@@ -117,7 +112,7 @@ class VideoComposer:
                 "-loop", "1", "-i", str(seg.image_path),
                 "-i", str(seg.audio_path),
                 "-filter_complex", filter_complex,
-                "-map", "[v]", "-map", "2:a",
+                "-map", "[v]", "-map", "[a]",
                 "-t", str(duration),
                 *self._encode_args(),
                 str(out),
@@ -126,14 +121,15 @@ class VideoComposer:
             filter_complex = (
                 f"color=black:size={W}x{H}:rate={FPS}[bg];"
                 f"[0:v]{img_filter}[img];"
-                f"[bg][img]{img_overlay}[v]"
+                f"[bg][img]{img_overlay}[v];"
+                f"[1:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
             )
             cmd = [
                 "ffmpeg", "-y",
                 "-loop", "1", "-i", str(seg.image_path),
                 "-i", str(seg.audio_path),
                 "-filter_complex", filter_complex,
-                "-map", "[v]", "-map", "1:a",
+                "-map", "[v]", "-map", "[a]",
                 "-t", str(duration),
                 *self._encode_args(),
                 str(out),
@@ -157,8 +153,7 @@ class VideoComposer:
         if bg:
             inputs += ["-stream_loop", "-1", "-i", str(bg)]
             filter_parts.append(
-                f"[{next_idx}:v]scale={W}:{H}:force_original_aspect_ratio=increase,"
-                f"crop={W}:{H},setsar=1,fps={FPS}[vbg]"
+                f"[{next_idx}:v]scale=-2:{H},crop={W}:{H},setsar=1,fps={FPS}[vbg]"
             )
             next_idx += 1
         else:
@@ -176,18 +171,23 @@ class VideoComposer:
         else:
             filter_parts.append("[vbg]null[v]")
 
-        # Audio: sound effect or silence
+        # Audio: sound effect (resampled) or generated silence
         if transition.sound_path:
             inputs += ["-i", str(transition.sound_path)]
+            filter_parts.append(
+                f"[{next_idx}:a]aresample=44100,"
+                f"aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
+            )
         else:
-            inputs += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
+            filter_parts.append(
+                "anullsrc=channel_layout=stereo:sample_rate=44100[a]"
+            )
 
         cmd = [
             "ffmpeg", "-y",
             *inputs,
             "-filter_complex", ";".join(filter_parts),
-            "-map", "[v]",
-            "-map", f"{next_idx}:a",
+            "-map", "[v]", "-map", "[a]",
             "-t", str(duration),
             *self._encode_args(),
             str(out),
@@ -252,7 +252,7 @@ class VideoComposer:
     def _encode_args() -> list[str]:
         return [
             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-            "-c:a", "aac", "-ar", "44100", "-b:a", "128k",
+            "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "128k",
             "-r", str(FPS),
         ]
 
