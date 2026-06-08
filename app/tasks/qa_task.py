@@ -287,6 +287,27 @@ def compose_video_task(self, job_id: str) -> None:
                     )
                 )
 
+        # Download per-segment reading gifs
+        reading_gif_paths: dict[int, Path] = {}
+        if media:
+            for i, rg_asset in enumerate(media.reading_gifs):
+                if i >= len(segments):
+                    break
+                ext = Path(rg_asset.key).suffix
+                dl_path = media_dir / f"rgif_{i:03d}{ext}"
+                minio.download(rg_asset.bucket, rg_asset.key, dl_path)
+                reading_gif_paths[i] = dl_path
+
+        segments = [
+            QASegment(
+                image_path=seg.image_path,
+                audio_path=seg.audio_path,
+                duration=seg.duration,
+                reading_gif_path=reading_gif_paths.get(i),
+            )
+            for i, seg in enumerate(segments)
+        ]
+
         store.update_job(job_id, progress_percent=75)
 
         output_dir = work_dir / "output"

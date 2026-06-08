@@ -19,12 +19,17 @@ IMG_MAX_W = 1020
 IMG_MAX_H = 500
 AUDIO_VOLUME = 2.0   # boost factor for all audio streams (TTS + transition)
 
+_IMG_CENTER_Y = 640                                    # must match overlay expression
+READING_GIF_TOP = _IMG_CENTER_Y + IMG_MAX_H // 2 + 50  # just below max image extent = 940
+READING_GIF_H = H - READING_GIF_TOP                    # = 1000
+
 
 @dataclass
 class QASegment:
     image_path: Path
     audio_path: Path
     duration: float
+    reading_gif_path: Path | None = None  # gif shown full-screen behind the QA image during reading
 
 
 @dataclass
@@ -90,6 +95,16 @@ class VideoComposer:
             bg_vidx = next_idx
             next_idx += 1
 
+        # Reading gifs (one per segment, looped)
+        reading_gif_vidx: list[int | None] = []
+        for seg in segments:
+            if seg.reading_gif_path:
+                input_args += ["-stream_loop", "-1", "-i", str(seg.reading_gif_path)]
+                reading_gif_vidx.append(next_idx)
+                next_idx += 1
+            else:
+                reading_gif_vidx.append(None)
+
         # Images (looped stills)
         img_vidx: list[int] = []
         for seg in segments:
@@ -137,8 +152,25 @@ class VideoComposer:
                 f"color=black:size={W}x{H}:rate={FPS}:duration={total_dur}[vbg]"
             )
 
-        # Overlay each QA image for [seg_start, img_vis_end] (stays through transition)
+        # Overlay reading gifs full-screen during each segment (behind QA image)
         prev_v = "vbg"
+        for i in range(len(segments)):
+            if reading_gif_vidx[i] is not None:
+                rgin = f"rgifraw{i}"
+                rgout = f"vrgif{i}"
+                vs = seg_starts[i]
+                ve = seg_starts[i] + segments[i].duration
+                fp.append(
+                    f"[{reading_gif_vidx[i]}:v]scale=-2:{READING_GIF_H}"
+                    f",crop={W}:{READING_GIF_H},setsar=1,fps={FPS}[{rgin}]"
+                )
+                fp.append(
+                    f"[{prev_v}][{rgin}]overlay=0:{READING_GIF_TOP}"
+                    f":enable='between(t,{vs},{ve})'[{rgout}]"
+                )
+                prev_v = rgout
+
+        # Overlay each QA image for [seg_start, img_vis_end] (stays through transition)
         img_scale = (
             f"scale={IMG_MAX_W}:{IMG_MAX_H}"
             f":force_original_aspect_ratio=decrease,setsar=1"

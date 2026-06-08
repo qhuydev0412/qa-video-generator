@@ -373,6 +373,10 @@ def confirm_media(
             MinioMedia(bucket=t.bucket, key=t.key, media_type=t.media_type)
             for t in body.transitions
         ],
+        reading_gifs=[
+            MinioMedia(bucket=t.bucket, key=t.key, media_type=t.media_type)
+            for t in body.reading_gifs
+        ],
     )
 
     store.update_job(job_id, media_selection=selection)

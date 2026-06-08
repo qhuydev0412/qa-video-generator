@@ -230,6 +230,11 @@ select.voice-select:focus { outline: none; border-color: #6366f1; }
       </div>
 
       <div class="media-section">
+        <h3>🖼️ Gif trong lúc đọc</h3>
+        <div id="reading-gif-section"></div>
+      </div>
+
+      <div class="media-section">
         <h3>🎬 Hiệu ứng chuyển cảnh</h3>
         <div id="transition-section"></div>
       </div>
@@ -268,9 +273,11 @@ let pollTimer = null;
 let questionFile = null;
 let answerFiles = [];
 let selectedMedia = { bg: null };
-let slotOptions = [];    // slotOptions[i] = [{bucket,key,media_type}, ...]
-let slotSelections = []; // slotSelections[i] = selected index in slotOptions[i]
+let slotOptions = [];         // transition slots
+let slotSelections = [];      // transition slot selections
 let nTransitions = 0;
+let readingGifOptions = [];   // reading gif slots (one per segment)
+let readingGifSelections = []; // reading gif slot selections
 
 const VOICES = [
   { id: 'alloy',   name: 'Alloy (Trung tính)' },
@@ -651,16 +658,20 @@ function renderMediaSelection(job) {
   const opts = job.media_options || {};
 
   nTransitions = opts.n_transitions || 0;
+  const nSegments = nTransitions + 1;
+
   slotOptions = Array(nTransitions).fill(null);
   slotSelections = Array(nTransitions).fill(0);
+  readingGifOptions = Array(nSegments).fill(null);
+  readingGifSelections = Array(nSegments).fill(0);
 
   const bgOptions = opts.background_options || [];
   renderMediaGrid('bg-grid', bgOptions, 'bg', 'background');
-  // Auto-select first background
   if (bgOptions.length > 0) {
     selectedMedia.bg = { bucket: bgOptions[0].bucket, key: bgOptions[0].key };
     document.getElementById(`media-bg-0`)?.classList.add('selected');
   }
+  renderReadingGifSection(nSegments);
   renderTransitionSection();
   showView('media');
 }
@@ -700,6 +711,95 @@ function selectMedia(key, bucket, objKey, idx) {
   } else {
     el.classList.add('selected');
     selectedMedia[key] = { bucket, key: objKey };
+  }
+}
+
+function renderReadingGifSection(nSegments) {
+  const container = document.getElementById('reading-gif-section');
+  const labels = ['Câu hỏi', ...Array.from({length: nSegments - 1}, (_, i) => `Câu trả lời ${i + 1}`)];
+  container.innerHTML = Array.from({ length: nSegments }, (_, i) => `
+    <div class="trans-slot">
+      <div class="trans-slot-header">
+        <span>📖 ${labels[i]}</span>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="rsearch-slot-${i}" class="slot-search" placeholder="Tìm gif..." onkeydown="if(event.key==='Enter')searchReadingGifSlot(${i})">
+          <button class="btn btn-sm btn-secondary btn-icon" onclick="searchReadingGifSlot(${i})" title="Tìm">🔍</button>
+          <button class="btn btn-sm btn-secondary btn-icon" onclick="reloadReadingGifSlot(${i})" title="Tải ngẫu nhiên">🔄</button>
+        </div>
+      </div>
+      <div id="reading-gif-grid-${i}">
+        <div class="trans-slot-loading"><div class="spinner" style="width:20px;height:20px;border-width:2px"></div> Đang tải...</div>
+      </div>
+    </div>`).join('');
+
+  for (let i = 0; i < nSegments; i++) loadReadingGifOptions(i);
+}
+
+async function loadReadingGifOptions(slotIdx) {
+  try {
+    const res = await fetch('/api/v1/transition-options?n=4');
+    if (!res.ok) throw new Error('Lỗi tải');
+    const items = await res.json();
+    readingGifOptions[slotIdx] = items;
+    readingGifSelections[slotIdx] = 0;
+    renderReadingGifGrid(slotIdx);
+  } catch (err) {
+    const el = document.getElementById(`reading-gif-grid-${slotIdx}`);
+    if (el) el.innerHTML = `<p class="no-media-msg">❌ ${err.message}</p>`;
+  }
+}
+
+function renderReadingGifGrid(slotIdx) {
+  const el = document.getElementById(`reading-gif-grid-${slotIdx}`);
+  if (!el) return;
+  const items = readingGifOptions[slotIdx] || [];
+  const sel = readingGifSelections[slotIdx] ?? 0;
+  if (!items.length) { el.innerHTML = '<p class="no-media-msg">Không có media</p>'; return; }
+
+  el.innerHTML = `<div class="media-grid">${items.map((item, i) => {
+    const proxyUrl = `/api/v1/media/preview/${item.bucket}/${item.key}`;
+    const filename = item.key.split('/').pop();
+    const ext = filename.split('.').pop().toLowerCase();
+    let preview = '';
+    if (['mp4', 'webm', 'mov', 'gif'].includes(ext)) {
+      preview = `<video src="${proxyUrl}" controls style="width:100%;height:80px;object-fit:cover"></video>`;
+    } else if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) {
+      preview = `<div style="padding:6px"><audio controls src="${proxyUrl}" style="width:100%"></audio></div>`;
+    } else {
+      preview = `<div class="media-none">📄</div>`;
+    }
+    return `<div class="media-option ${i === sel ? 'selected' : ''}" onclick="selectReadingGifOption(${slotIdx},${i})">
+      ${preview}<div class="media-label">${filename}</div></div>`;
+  }).join('')}</div>`;
+}
+
+function selectReadingGifOption(slotIdx, optionIdx) {
+  readingGifSelections[slotIdx] = optionIdx;
+  renderReadingGifGrid(slotIdx);
+}
+
+async function reloadReadingGifSlot(slotIdx) {
+  const searchEl = document.getElementById(`rsearch-slot-${slotIdx}`);
+  if (searchEl) searchEl.value = '';
+  const el = document.getElementById(`reading-gif-grid-${slotIdx}`);
+  if (el) el.innerHTML = '<div class="trans-slot-loading"><div class="spinner" style="width:20px;height:20px;border-width:2px"></div> Đang tải...</div>';
+  await loadReadingGifOptions(slotIdx);
+}
+
+async function searchReadingGifSlot(slotIdx) {
+  const query = document.getElementById(`rsearch-slot-${slotIdx}`)?.value.trim() || '';
+  const el = document.getElementById(`reading-gif-grid-${slotIdx}`);
+  if (el) el.innerHTML = '<div class="trans-slot-loading"><div class="spinner" style="width:20px;height:20px;border-width:2px"></div> Đang tìm...</div>';
+  try {
+    const url = `/api/v1/transition-options?n=8${query ? '&search=' + encodeURIComponent(query) : ''}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Lỗi tải');
+    const items = await res.json();
+    readingGifOptions[slotIdx] = items;
+    readingGifSelections[slotIdx] = 0;
+    renderReadingGifGrid(slotIdx);
+  } catch (err) {
+    if (el) el.innerHTML = `<p class="no-media-msg">❌ ${err.message}</p>`;
   }
 }
 
@@ -815,9 +915,14 @@ async function confirmMedia() {
     body.background_bucket = selectedMedia.bg.bucket;
     body.background_key = selectedMedia.bg.key;
   }
-  // Build transitions from per-slot selections
   body.transitions = slotSelections.map((sel, i) => {
     const item = slotOptions[i]?.[sel];
+    if (!item) return null;
+    return { bucket: item.bucket, key: item.key, media_type: item.media_type };
+  }).filter(Boolean);
+
+  body.reading_gifs = readingGifSelections.map((sel, i) => {
+    const item = readingGifOptions[i]?.[sel];
     if (!item) return null;
     return { bucket: item.bucket, key: item.key, media_type: item.media_type };
   }).filter(Boolean);
@@ -886,6 +991,8 @@ function resetAll() {
   slotOptions = [];
   slotSelections = [];
   nTransitions = 0;
+  readingGifOptions = [];
+  readingGifSelections = [];
   stopPolling();
   document.getElementById('preview-question').innerHTML = '';
   document.getElementById('answer-list').innerHTML = '';

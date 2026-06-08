@@ -75,6 +75,7 @@ class MediaOptions(BaseModel):
 class MediaSelection(BaseModel):
     background: Optional[MinioMedia] = None
     transitions: list[MinioMedia] = Field(default_factory=list)  # one per transition slot
+    reading_gifs: list[MinioMedia] = Field(default_factory=list)  # one per segment
 
 
 class ErrorDetail(BaseModel):

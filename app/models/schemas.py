@@ -59,6 +59,7 @@ class MediaConfirmRequest(BaseModel):
     background_bucket: Optional[str] = None
     background_key: Optional[str] = None
     transitions: list[TransitionItem] = []
+    reading_gifs: list[TransitionItem] = []
 
 
 class CancelResponse(BaseModel):
