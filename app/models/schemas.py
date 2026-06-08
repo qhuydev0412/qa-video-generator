@@ -46,6 +46,7 @@ class TextConfirmRequest(BaseModel):
 
 class VoicePreviewRequest(BaseModel):
     voice_id: str
+    text: Optional[str] = None
 
 
 class TransitionItem(BaseModel):

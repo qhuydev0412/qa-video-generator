@@ -68,11 +68,11 @@ header span { font-size: 24px; }
 .voice-card .top { display: flex; gap: 16px; align-items: flex-start; }
 .voice-card img { width: 80px; height: 70px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
 .voice-card .info { flex: 1; min-width: 0; }
-.voice-card .seg-text { font-size: 14px; color: #ccc; margin-bottom: 10px; line-height: 1.5; }
-.voice-preview-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.voice-card textarea { width: 100%; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #e5e5e5; font-size: 14px; padding: 8px 10px; resize: vertical; min-height: 70px; margin-bottom: 10px; }
+.voice-card textarea:focus { outline: none; border-color: #6366f1; }
+.voice-controls-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .voice-name-tag { font-size: 12px; color: #a78bfa; background: rgba(99,102,241,0.15); padding: 3px 10px; border-radius: 4px; white-space: nowrap; }
-.voice-card audio { height: 36px; flex: 1; min-width: 160px; }
-.voice-change-panel { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px; }
+.voice-card audio { width: 100%; height: 36px; margin-top: 8px; }
 select.voice-select { background: #1a1a1a; border: 1px solid #333; color: #e5e5e5; padding: 7px 12px; border-radius: 6px; font-size: 14px; }
 select.voice-select:focus { outline: none; border-color: #6366f1; }
 
@@ -556,18 +556,19 @@ function renderVoiceSelection(job) {
   setStepActive(3);
   const segments = job.voice_options_per_segment || [];
 
-  const voiceOpts = VOICES.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
-
   const container = document.getElementById('voice-cards');
   container.innerHTML = segments.map(seg => {
     const label = seg.image_index === 0 ? 'Câu hỏi' : `Câu trả lời ${seg.image_index}`;
     const badge = seg.image_index === 0 ? 'badge-question' : 'badge-answer';
-    const curOption = seg.options && seg.options.length > 0 ? seg.options[0] : null;
-    const curName = curOption ? curOption.voice_name : 'Alloy (Trung tính)';
-    const audioFilename = curOption ? curOption.audio_path.split(/[\\/]/).pop() : null;
+    const curVoiceId = seg.selected_voice_id || 'nova';
+    const curOption = seg.options?.find(o => o.voice_id === curVoiceId) || seg.options?.[0];
+    const audioFilename = curOption?.audio_path.split(/[\\/]/).pop();
+    const voiceOpts = VOICES.map(v =>
+      `<option value="${v.id}" ${v.id === curVoiceId ? 'selected' : ''}>${v.name}</option>`
+    ).join('');
     const audioEl = audioFilename
-      ? `<audio id="vaudio-${seg.image_index}" controls src="/api/v1/jobs/${jobId}/audio/${audioFilename}" style="height:36px;flex:1;min-width:160px"></audio>`
-      : '';
+      ? `<audio id="vaudio-${seg.image_index}" controls src="/api/v1/jobs/${jobId}/audio/${audioFilename}"></audio>`
+      : `<audio id="vaudio-${seg.image_index}" controls style="display:none"></audio>`;
 
     return `<div class="voice-card">
       <div class="top">
@@ -575,17 +576,13 @@ function renderVoiceSelection(job) {
              onerror="this.style.background='#333';this.removeAttribute('src')" alt="${label}">
         <div class="info">
           <div style="margin-bottom:8px"><span class="badge ${badge}">${label}</span></div>
-          <div class="seg-text">${seg.text}</div>
-          <div class="voice-preview-row">
-            <span class="voice-name-tag" id="vname-${seg.image_index}">${curName}</span>
-            ${audioEl}
-            <button class="btn btn-sm btn-secondary" onclick="toggleChangeVoice(${seg.image_index})">🔄 Đổi giọng</button>
-          </div>
-          <div class="voice-change-panel" id="vchange-${seg.image_index}" style="display:none">
+          <textarea id="vtext-${seg.image_index}">${seg.text}</textarea>
+          <div class="voice-controls-row">
             <select class="voice-select" id="voice-sel-${seg.image_index}">${voiceOpts}</select>
-            <button class="btn btn-sm btn-secondary" id="vprev-btn-${seg.image_index}" onclick="previewVoice(${seg.image_index})">▶ Thử</button>
+            <button class="btn btn-sm btn-primary" id="vprev-btn-${seg.image_index}" onclick="previewVoice(${seg.image_index})">▶ Tạo lại</button>
             <span id="vprev-status-${seg.image_index}" style="font-size:12px;color:#888"></span>
           </div>
+          ${audioEl}
         </div>
       </div>
     </div>`;
@@ -594,15 +591,13 @@ function renderVoiceSelection(job) {
   showView('voice');
 }
 
-function toggleChangeVoice(imageIndex) {
-  const panel = document.getElementById(`vchange-${imageIndex}`);
-  panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
-}
-
 async function previewVoice(imageIndex) {
   const voiceId = document.getElementById(`voice-sel-${imageIndex}`).value;
+  const text = document.getElementById(`vtext-${imageIndex}`).value.trim();
   const statusEl = document.getElementById(`vprev-status-${imageIndex}`);
   const btn = document.getElementById(`vprev-btn-${imageIndex}`);
+
+  if (!text) { showToast('Nội dung không được để trống'); return; }
 
   btn.disabled = true;
   statusEl.textContent = '⏳ Đang tạo...';
@@ -611,26 +606,21 @@ async function previewVoice(imageIndex) {
     const res = await fetch(`/api/v1/jobs/${jobId}/segments/${imageIndex}/preview-voice`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voice_id: voiceId }),
+      body: JSON.stringify({ voice_id: voiceId, text }),
     });
     if (!res.ok) throw new Error((await res.json()).detail || 'Lỗi');
     const data = await res.json();
 
     const audioEl = document.getElementById(`vaudio-${imageIndex}`);
-    const nameEl = document.getElementById(`vname-${imageIndex}`);
     if (audioEl) {
       audioEl.src = `/api/v1/jobs/${jobId}/audio/${data.audio_filename}`;
+      audioEl.style.display = '';
       audioEl.load();
       audioEl.play().catch(() => {});
     }
-    if (nameEl) nameEl.textContent = data.voice_name;
 
     statusEl.textContent = '✅';
-    setTimeout(() => {
-      const panel = document.getElementById(`vchange-${imageIndex}`);
-      if (panel) panel.style.display = 'none';
-      statusEl.textContent = '';
-    }, 1200);
+    setTimeout(() => statusEl.textContent = '', 2000);
   } catch (err) {
     statusEl.textContent = '❌ ' + err.message;
   } finally {

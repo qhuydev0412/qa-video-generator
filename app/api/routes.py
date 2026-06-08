@@ -242,7 +242,13 @@ def preview_voice(
 
     voice_name = next(v["name"] for v in VOICES if v["id"] == voice_id)
 
-    existing = next((o for o in seg.options if o.voice_id == voice_id), None)
+    # Use provided text if given, otherwise keep stored text
+    text_to_use = body.text.strip() if body.text and body.text.strip() else seg.text
+    text_changed = text_to_use != seg.text
+
+    # Skip cache if text changed (need fresh audio for new content)
+    existing = None if text_changed else next((o for o in seg.options if o.voice_id == voice_id), None)
+
     if existing:
         audio_filename = Path(existing.audio_path).name
         updated_seg = seg.model_copy(update={
@@ -252,20 +258,26 @@ def preview_voice(
     else:
         voices_dir = Path(job.work_dir) / "voices"
         voices_dir.mkdir(parents=True, exist_ok=True)
-        output_path = voices_dir / f"img{segment_idx}_{voice_id}.mp3"
+        # Include a hash suffix so text edits don't collide with cached files
+        import hashlib
+        text_hash = hashlib.md5(text_to_use.encode()).hexdigest()[:6]
+        output_path = voices_dir / f"img{segment_idx}_{voice_id}_{text_hash}.mp3"
         try:
             synthesizer = VoiceSynthesizer(model=settings.TTS_MODEL)
-            synthesizer.synthesize(seg.text, voice_id, output_path)
+            synthesizer.synthesize(text_to_use, voice_id, output_path)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"TTS thất bại: {exc}")
 
         audio_filename = output_path.name
         new_preview = VoicePreview(voice_id=voice_id, voice_name=voice_name, audio_path=str(output_path))
-        updated_seg = seg.model_copy(update={
+        update_fields: dict = {
             "options": seg.options + [new_preview],
             "selected_voice_id": voice_id,
             "selected_audio_path": str(output_path),
-        })
+        }
+        if text_changed:
+            update_fields["text"] = text_to_use
+        updated_seg = seg.model_copy(update=update_fields)
 
     updated_segs = [updated_seg if s.image_index == segment_idx else s for s in job.voice_options_per_segment]
     store.update_job(job_id, voice_options_per_segment=updated_segs)
