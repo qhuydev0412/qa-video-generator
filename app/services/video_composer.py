@@ -21,7 +21,9 @@ AUDIO_VOLUME = 2.0   # boost factor for all audio streams (TTS + transition)
 
 _IMG_CENTER_Y = 640                                    # must match overlay expression
 READING_GIF_TOP = _IMG_CENTER_Y + IMG_MAX_H // 2 + 50  # just below max image extent = 940
-READING_GIF_H = H - READING_GIF_TOP                    # = 1000
+READING_GIF_W = 820
+READING_GIF_H = 680
+READING_GIF_X = (W - READING_GIF_W) // 2              # center horizontally = 130
 
 
 @dataclass
@@ -161,12 +163,12 @@ class VideoComposer:
                 vs = seg_starts[i]
                 ve = seg_starts[i] + segments[i].duration
                 fp.append(
-                    f"[{reading_gif_vidx[i]}:v]scale={W}:{READING_GIF_H}"
+                    f"[{reading_gif_vidx[i]}:v]scale={READING_GIF_W}:{READING_GIF_H}"
                     f":force_original_aspect_ratio=increase"
-                    f",crop={W}:{READING_GIF_H},setsar=1,fps={FPS}[{rgin}]"
+                    f",crop={READING_GIF_W}:{READING_GIF_H},setsar=1,fps={FPS}[{rgin}]"
                 )
                 fp.append(
-                    f"[{prev_v}][{rgin}]overlay=0:{READING_GIF_TOP}"
+                    f"[{prev_v}][{rgin}]overlay={READING_GIF_X}:{READING_GIF_TOP}"
                     f":enable='between(t,{vs},{ve})'[{rgout}]"
                 )
                 prev_v = rgout

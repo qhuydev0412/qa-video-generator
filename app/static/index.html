@@ -456,6 +456,7 @@ let pollCount = 0;
 function startPolling() {
   stopPolling();
   pollCount = 0;
+  pollStatus(); // immediate first check
   pollTimer = setInterval(pollStatus, 5000);
 }
 
@@ -559,10 +560,15 @@ async function confirmText() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ texts }),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Lỗi xác nhận');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(`HTTP ${res.status}: ${errData.detail || 'Lỗi xác nhận'}`);
+    }
     startPolling();
   } catch (err) {
+    console.error('confirmText error:', err);
     showToast('❌ ' + err.message);
+    showView('text-review');
   }
 }
 
@@ -652,10 +658,15 @@ async function confirmVoices() {
 
   try {
     const res = await fetch(`/api/v1/jobs/${jobId}/confirm/voices`, { method: 'POST' });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Lỗi xác nhận');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(`HTTP ${res.status}: ${errData.detail || 'Lỗi xác nhận'}`);
+    }
     startPolling();
   } catch (err) {
+    console.error('confirmVoices error:', err);
     showToast('❌ ' + err.message);
+    showView('voice');
   }
 }
 
@@ -947,10 +958,15 @@ async function confirmMedia() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Lỗi xác nhận');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(`HTTP ${res.status}: ${errData.detail || 'Lỗi xác nhận'}`);
+    }
     startPolling();
   } catch (err) {
+    console.error('confirmMedia error:', err);
     showToast('❌ ' + err.message);
+    showView('media');
   }
 }
 
