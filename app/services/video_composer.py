@@ -17,6 +17,7 @@ H = 1920
 FPS = 24
 IMG_MAX_W = 1020
 IMG_MAX_H = 500
+AUDIO_VOLUME = 2.0   # boost factor for all audio streams (TTS + transition)
 
 
 @dataclass
@@ -182,6 +183,7 @@ class VideoComposer:
             fp.append(
                 f"[{tts_aidx[i]}:a]aresample=44100"
                 f",aformat=sample_fmts=fltp:channel_layouts=stereo"
+                f",volume={AUDIO_VOLUME}"
                 f",adelay={delay_ms}|{delay_ms}[{al}]"
             )
             a_labels.append(f"[{al}]")
@@ -194,6 +196,7 @@ class VideoComposer:
                 fp.append(
                     f"[{sound_aidx[i]}:a]aresample=44100"
                     f",aformat=sample_fmts=fltp:channel_layouts=stereo"
+                    f",volume={AUDIO_VOLUME}"
                     f",atrim=duration={trans_dur}"
                     f",adelay={delay_ms}|{delay_ms}[{al}]"
                 )
@@ -203,6 +206,7 @@ class VideoComposer:
                 fp.append(
                     f"[{gif_vidx[i]}:a]aresample=44100"
                     f",aformat=sample_fmts=fltp:channel_layouts=stereo"
+                    f",volume={AUDIO_VOLUME}"
                     f",atrim=duration={trans_dur}"
                     f",adelay={delay_ms}|{delay_ms}[{al}]"
                 )
@@ -211,7 +215,8 @@ class VideoComposer:
         if len(a_labels) > 1:
             fp.append(
                 f"{''.join(a_labels)}"
-                f"amix=inputs={len(a_labels)}:duration=longest:dropout_transition=0[aout]"
+                f"amix=inputs={len(a_labels)}:duration=longest"
+                f":dropout_transition=0:normalize=0[aout]"
             )
         elif len(a_labels) == 1:
             fp.append(f"{a_labels[0]}acopy[aout]")
