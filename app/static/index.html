@@ -451,9 +451,12 @@ async function startJob() {
 // ============================================================
 // Polling
 // ============================================================
+let pollCount = 0;
+
 function startPolling() {
   stopPolling();
-  pollTimer = setInterval(pollStatus, 2000);
+  pollCount = 0;
+  pollTimer = setInterval(pollStatus, 5000);
 }
 
 function stopPolling() {
@@ -462,6 +465,13 @@ function stopPolling() {
 
 async function pollStatus() {
   if (!jobId) return;
+  pollCount++;
+  if (pollCount > 60) { // 5 phút không xong
+    stopPolling();
+    showToast('⚠️ Job xử lý quá lâu, có thể worker đã bị lỗi. Vui lòng thử lại.');
+    showView('upload');
+    return;
+  }
   try {
     const res = await fetch(`/api/v1/jobs/${jobId}`);
     if (!res.ok) return;

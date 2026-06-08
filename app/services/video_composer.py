@@ -161,7 +161,8 @@ class VideoComposer:
                 vs = seg_starts[i]
                 ve = seg_starts[i] + segments[i].duration
                 fp.append(
-                    f"[{reading_gif_vidx[i]}:v]scale=-2:{READING_GIF_H}"
+                    f"[{reading_gif_vidx[i]}:v]scale={W}:{READING_GIF_H}"
+                    f":force_original_aspect_ratio=increase"
                     f",crop={W}:{READING_GIF_H},setsar=1,fps={FPS}[{rgin}]"
                 )
                 fp.append(
