@@ -467,7 +467,7 @@ function stopPolling() {
 async function pollStatus() {
   if (!jobId) return;
   pollCount++;
-  if (pollCount > 60) { // 5 phút không xong
+  if (pollCount > 360) { // 30 phút không xong
     stopPolling();
     showToast('⚠️ Job xử lý quá lâu, có thể worker đã bị lỗi. Vui lòng thử lại.');
     showView('upload');
